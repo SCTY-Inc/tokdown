@@ -1,0 +1,22 @@
+.DS_Store
+/.build
+/Packages
+xcuserdata/
+DerivedData/
+.swiftpm/configuration/registries.json
+.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+.netrc
+
+# Build artifacts
+MenuBarRecorder.app/
+
+# Audio files (transcripts only in git)
+*.m4a
+*.wav
+*.mp3
+*.aac
+
+# Signing
+*.key
+*.cer
+*.certSigningRequest
