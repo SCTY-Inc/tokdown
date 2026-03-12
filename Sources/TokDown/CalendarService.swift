@@ -13,10 +13,8 @@ final class CalendarService: NSObject {
             return true
         case .notDetermined:
             return await withCheckedContinuation { continuation in
-                DispatchQueue.global(qos: .userInitiated).async { [store] in
-                    store.requestAccess(to: .event) { granted, _ in
-                        continuation.resume(returning: granted)
-                    }
+                store.requestFullAccessToEvents { granted, _ in
+                    continuation.resume(returning: granted)
                 }
             }
         default:

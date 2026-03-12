@@ -1,10 +1,10 @@
-# CLAUDE.md — Echo Log
+# CLAUDE.md — TokDown
 
 macOS menu bar app: system audio → transcript markdown. ~800 LOC, no deps.
 
 ## Build & Run
 ```bash
-bash scripts/build-app.sh debug && open MenuBarRecorder.app
+bash scripts/build-app.sh debug && open TokDown.app
 ```
 
 ## Structure

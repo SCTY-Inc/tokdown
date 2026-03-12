@@ -21,17 +21,12 @@ final class MenuBarCoordinator: ObservableObject {
     private var currentArtifacts: SessionArtifacts?
     private var elapsedTimer: Timer?
 
-    var menuIconName: String {
-        state == .recording ? "record.circle.fill" : "record.circle"
-    }
-
     var menuTitle: String {
-        state == .recording ? "● \(formattedElapsed)" : ""
+        state == .recording ? formattedElapsed : ""
     }
 
     init(settingsStore: SettingsStore) {
         self.settingsStore = settingsStore
-        Task { await loadMeetings() }
     }
 
     deinit {
@@ -109,9 +104,6 @@ final class MenuBarCoordinator: ObservableObject {
         var fullText = ""
 
         do {
-            guard await transcriptionService.requestPermission() else {
-                throw TranscriptionError.authorizationNeeded
-            }
             let result = try await transcriptionService.transcribe(audioURL: audioURL)
             fullText = result.0
             lines = result.1

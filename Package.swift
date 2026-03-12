@@ -2,18 +2,25 @@
 import PackageDescription
 
 let package = Package(
-    name: "MenuBarRecorder",
+    name: "TokDown",
     platforms: [
-        .macOS(.v13)
+        .macOS(.v26)
     ],
     products: [
-        .executable(name: "MenuBarRecorder", targets: ["MenuBarRecorder"])
+        .executable(name: "TokDown", targets: ["TokDown"])
     ],
     targets: [
         .executableTarget(
-            name: "MenuBarRecorder",
-            path: "Sources/MenuBarRecorder",
-            exclude: ["Resources/Info.plist", "Resources/MenuBarRecorder.entitlements"]
+            name: "TokDown",
+            path: "Sources/TokDown",
+            exclude: [
+                "Resources/Info.plist",
+                "Resources/TokDown.entitlements",
+                "Resources/TokDownIcon.svg",
+                "Resources/TokDownMenuIdle.svg",
+                "Resources/TokDownMenuRecording.svg",
+                "Resources/TokDownMenuTranscribing.svg"
+            ]
         )
     ]
 )

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>TokDown</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.scty.tokdown</string>
+    <key>CFBundleName</key>
+    <string>TokDown</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleDisplayName</key>
+    <string>TokDown</string>
+    <key>CFBundleIconFile</key>
+    <string>TokDownIcon</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>TokDown uses the microphone to capture interviews and meetings.</string>
+<key>NSCalendarsUsageDescription</key>
+    <string>TokDown needs calendar access to show upcoming meetings as recording targets.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>TokDown needs full calendar access to read upcoming meetings.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>TokDown uses screen capture to record system audio from meetings and other apps.</string>
+    <key>LSUIElement</key>
+    <true/>
+</dict>
+</plist>

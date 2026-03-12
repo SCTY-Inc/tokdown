@@ -2,6 +2,8 @@
 .build/
 .swiftpm/
 MenuBarRecorder.app/
+TokDown.app/
+TokDown.app.zip
 
 # Audio (transcripts only)
 *.m4a

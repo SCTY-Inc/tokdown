@@ -5,7 +5,7 @@ final class SettingsStore: ObservableObject {
     @Published var settings: AppSettings
 
     private let defaults = UserDefaults.standard
-    private let settingsKey = "MenuBarRecorder.Settings.V2"
+    private let settingsKey = "TokDown.Settings.V2"
 
     init() {
         settings = Self.defaultSettings
@@ -27,11 +27,6 @@ final class SettingsStore: ObservableObject {
         save()
     }
 
-    func setAudioSource(_ source: AudioSource) {
-        settings.audioSource = source
-        save()
-    }
-
     func save() {
         if let data = try? JSONEncoder().encode(settings) {
             defaults.setValue(data, forKey: settingsKey)
@@ -41,7 +36,13 @@ final class SettingsStore: ObservableObject {
     private func load() {
         if let data = defaults.data(forKey: settingsKey),
            let restored = try? JSONDecoder().decode(AppSettings.self, from: data) {
-            settings = restored
+            var normalized = restored
+            normalized.audioSource = .systemAudio
+            settings = normalized
+
+            if normalized.audioSource != restored.audioSource {
+                save()
+            }
         }
     }
 }
