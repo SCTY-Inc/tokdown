@@ -8,17 +8,22 @@ final class SettingsWindowManager {
     private var windowController: NSWindowController?
 
     func show(settingsStore: SettingsStore) {
+        let windowSize = NSSize(width: 380, height: 220)
+
         if windowController == nil {
             let hostingController = NSHostingController(rootView: SettingsWindowView(settingsStore: settingsStore))
             let window = NSWindow(contentViewController: hostingController)
             window.title = "Settings"
-            window.styleMask = [.titled, .closable, .miniaturizable]
-            window.setContentSize(NSSize(width: 320, height: 180))
+            window.styleMask = [.titled, .closable]
+            window.setContentSize(windowSize)
+            window.minSize = windowSize
+            window.maxSize = windowSize
             window.isReleasedWhenClosed = false
-            window.center()
             windowController = NSWindowController(window: window)
         }
 
+        windowController?.window?.setContentSize(windowSize)
+        windowController?.window?.center()
         NSApp.activate(ignoringOtherApps: true)
         windowController?.showWindow(nil)
         windowController?.window?.makeKeyAndOrderFront(nil)

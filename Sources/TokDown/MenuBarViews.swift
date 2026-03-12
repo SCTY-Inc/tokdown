@@ -23,14 +23,14 @@ struct MenuBarContentView: View {
             } else {
                 if !coordinator.upcomingMeetings.isEmpty {
                     ForEach(coordinator.upcomingMeetings) { meeting in
-                        Button("\(meeting.title)  \(meeting.timeWindowLabel)") {
+                        Button("⚙︎ \(meeting.title)  \(meeting.timeWindowLabel)") {
                             Task { await coordinator.startRecording(title: meeting.title) }
                         }
                     }
 
                     Divider()
 
-                    Button("Record without Meeting") {
+                    Button("⌾ Record without Meeting") {
                         Task { await coordinator.startRecording() }
                     }
                 } else {
@@ -65,22 +65,29 @@ struct SettingsWindowView: View {
     @ObservedObject var settingsStore: SettingsStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Label("Save Folder", systemImage: "folder").font(.headline)
-            Text(settingsStore.saveFolderURL.path)
-                .font(.caption)
-                .textSelection(.enabled)
-                .lineLimit(1)
-            Button("Choose") { chooseSaveFolder() }
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Save Folder", systemImage: "folder")
+                    .font(.headline)
+
+                Text(settingsStore.saveFolderURL.path)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+            }
+
+            Button("Choose Folder…") { chooseSaveFolder() }
 
             Text("Upcoming meetings appear directly in the menu bar when calendar access is allowed.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
-            Spacer()
+            Spacer(minLength: 0)
         }
-        .padding(14)
-        .frame(width: 320)
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private func chooseSaveFolder() {

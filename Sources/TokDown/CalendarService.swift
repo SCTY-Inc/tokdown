@@ -31,7 +31,7 @@ final class CalendarService: NSObject {
         let events = store.events(matching: predicate)
 
         return events
-            .filter { $0.endDate > now }
+            .filter { !$0.isAllDay && $0.endDate > now }
             .sorted { $0.startDate < $1.startDate }
             .prefix(limit)
             .map(UpcomingMeeting.init(event:))
@@ -47,7 +47,7 @@ final class CalendarService: NSObject {
         let events = store.events(matching: predicate)
 
         let active = events.first {
-            $0.startDate <= now && $0.endDate >= now
+            !$0.isAllDay && $0.startDate <= now && $0.endDate >= now
         }
 
         if let active = active {

@@ -23,8 +23,6 @@ Core product constraints:
 ├── CLAUDE.md
 ├── scripts/
 │   └── build-app.sh
-├── assets/
-│   └── README.md
 └── Sources/
     └── TokDown/
         ├── TokDownApp.swift
