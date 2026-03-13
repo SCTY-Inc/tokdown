@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 final class CalendarService: NSObject {
     private let store = EKEventStore()
+    nonisolated private static let meetingHorizon: TimeInterval = 7 * 24 * 60 * 60
 
     func requestAccess() async -> Bool {
         let status = EKEventStore.authorizationStatus(for: .event)
@@ -14,7 +15,9 @@ final class CalendarService: NSObject {
         case .notDetermined:
             return await withCheckedContinuation { continuation in
                 store.requestFullAccessToEvents { granted, _ in
-                    continuation.resume(returning: granted)
+                    Task { @MainActor in
+                        continuation.resume(returning: granted)
+                    }
                 }
             }
         default:
@@ -26,15 +29,18 @@ final class CalendarService: NSObject {
         guard await requestAccess() else { return [] }
 
         let now = Date()
-        let horizon = Calendar.current.date(byAdding: .hour, value: 12, to: now) ?? now
+        let horizon = now.addingTimeInterval(Self.meetingHorizon)
         let predicate = store.predicateForEvents(withStart: now, end: horizon, calendars: nil)
-        let events = store.events(matching: predicate)
-
-        return events
-            .filter { !$0.isAllDay && $0.endDate > now }
-            .sorted { $0.startDate < $1.startDate }
-            .prefix(limit)
+        let meetings = store.events(matching: predicate)
+            .filter { !$0.isAllDay }
             .map(UpcomingMeeting.init(event:))
+
+        return Self.selectUpcomingMeetings(
+            from: meetings,
+            now: now,
+            limit: limit,
+            horizon: Self.meetingHorizon
+        )
     }
 
     func meetingAtCurrentTime() async -> UpcomingMeeting? {
@@ -55,5 +61,26 @@ final class CalendarService: NSObject {
         }
 
         return nil
+    }
+
+    nonisolated static func selectUpcomingMeetings(
+        from meetings: [UpcomingMeeting],
+        now: Date,
+        limit: Int,
+        horizon: TimeInterval = meetingHorizon
+    ) -> [UpcomingMeeting] {
+        let end = now.addingTimeInterval(horizon)
+
+        return meetings
+            .filter { $0.endDate > now }
+            .filter { $0.startDate <= end }
+            .sorted { lhs, rhs in
+                if lhs.startDate == rhs.startDate {
+                    return lhs.endDate < rhs.endDate
+                }
+                return lhs.startDate < rhs.startDate
+            }
+            .prefix(limit)
+            .map { $0 }
     }
 }

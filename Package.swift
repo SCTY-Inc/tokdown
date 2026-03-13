@@ -21,6 +21,11 @@ let package = Package(
                 "Resources/TokDownMenuRecording.svg",
                 "Resources/TokDownMenuTranscribing.svg"
             ]
+        ),
+        .testTarget(
+            name: "TokDownTests",
+            dependencies: ["TokDown"],
+            path: "Tests/TokDownTests"
         )
     ]
 )

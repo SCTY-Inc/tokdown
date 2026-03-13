@@ -36,13 +36,7 @@ final class SettingsStore: ObservableObject {
     private func load() {
         if let data = defaults.data(forKey: settingsKey),
            let restored = try? JSONDecoder().decode(AppSettings.self, from: data) {
-            var normalized = restored
-            normalized.audioSource = .systemAudio
-            settings = normalized
-
-            if normalized.audioSource != restored.audioSource {
-                save()
-            }
+            settings = restored
         }
     }
 }

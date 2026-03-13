@@ -10,14 +10,16 @@ final class StorageService {
     func sessionArtifacts(folderBase: URL, title: String, startTime: Date) throws -> SessionArtifacts {
         try FileManager.default.createDirectory(at: folderBase, withIntermediateDirectories: true)
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd_HH-mm"
-        let baseName = "\(formatter.string(from: startTime))_\(sanitize(title))"
+        let baseName = makeBaseName(title: title, startTime: startTime)
 
         return SessionArtifacts(
             audioURL: folderBase.appendingPathComponent("\(baseName).m4a"),
             transcriptURL: folderBase.appendingPathComponent("\(baseName).md")
         )
+    }
+
+    func transcriptURL(folderBase: URL, title: String, startTime: Date) -> URL {
+        folderBase.appendingPathComponent("\(makeBaseName(title: title, startTime: startTime)).md")
     }
 
     func writeTranscript(_ text: String, to url: URL) throws {
@@ -30,6 +32,12 @@ final class StorageService {
 
     func openFolder(_ url: URL) {
         NSWorkspace.shared.open(url)
+    }
+
+    private func makeBaseName(title: String, startTime: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd_HH-mm"
+        return "\(formatter.string(from: startTime))_\(sanitize(title))"
     }
 
     private func sanitize(_ text: String) -> String {

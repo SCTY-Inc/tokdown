@@ -24,7 +24,7 @@ struct MenuBarContentView: View {
                 if !coordinator.upcomingMeetings.isEmpty {
                     ForEach(coordinator.upcomingMeetings) { meeting in
                         Button("⚙︎ \(meeting.title)  \(meeting.timeWindowLabel)") {
-                            Task { await coordinator.startRecording(title: meeting.title) }
+                            Task { await coordinator.startRecording(meeting: meeting) }
                         }
                     }
 

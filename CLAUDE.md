@@ -1,6 +1,6 @@
 # CLAUDE.md — TokDown
 
-macOS menu bar app: system audio → transcript markdown. ~800 LOC, no deps.
+macOS menu bar app: system audio → transcript markdown. ~1.2k app LOC, small XCTest coverage, no deps.
 
 ## Build & Run
 ```bash
@@ -11,7 +11,7 @@ bash scripts/build-app.sh debug && open TokDown.app
 3 states: idle → recording → transcribing. See AGENTS.md for full architecture.
 
 ## Output
-`~/Documents/Transcripts/YYYY-MM-DD_HH-mm_Title.md` — flat, no audio files, git-friendly.
+`~/Documents/Transcripts/YYYY-MM-DD_HH-mm_Title.md` — date-first filenames, YAML front matter + markdown body, no audio files, git-friendly.
 
 ## Gotchas
 - Swift 6 concurrency: no `Task { @MainActor in }` inside completion handlers

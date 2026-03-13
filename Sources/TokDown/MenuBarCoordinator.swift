@@ -16,8 +16,10 @@ final class MenuBarCoordinator: ObservableObject {
     private let systemAudioService = SystemAudioService()
     private let transcriptionService = TranscriptionService()
     private let storageService = StorageService()
+    private let transcriptFormatter = TranscriptFormatter()
 
     private var startTime: Date?
+    private var currentMeeting: UpcomingMeeting?
     private var currentArtifacts: SessionArtifacts?
     private var elapsedTimer: Timer?
 
@@ -36,16 +38,16 @@ final class MenuBarCoordinator: ObservableObject {
     // MARK: - Meetings
 
     func loadMeetings() async {
-        upcomingMeetings = await calendarService.upcomingMeetings(limit: 5)
+        upcomingMeetings = await calendarService.upcomingMeetings(limit: 3)
     }
 
     // MARK: - Recording
 
-    func startRecording(title: String? = nil) async {
+    func startRecording(meeting: UpcomingMeeting? = nil) async {
         guard state == .idle else { return }
         statusMessage = nil
 
-        let label = title ?? "Recording"
+        let label = meeting?.title ?? settingsStore.settings.audioSource.title
         let useSystemAudio = settingsStore.settings.audioSource == .systemAudio
 
         if !useSystemAudio {
@@ -71,11 +73,13 @@ final class MenuBarCoordinator: ObservableObject {
 
             startTime = now
             activeTitle = label
+            currentMeeting = meeting
             currentArtifacts = artifacts
             state = .recording
             elapsedSeconds = 0
             startElapsedTimer()
         } catch {
+            currentMeeting = nil
             statusMessage = "Failed: \(error.localizedDescription)"
         }
     }
@@ -93,43 +97,67 @@ final class MenuBarCoordinator: ObservableObject {
 
         guard let audioURL else {
             statusMessage = "No audio file."
+            startTime = nil
+            activeTitle = nil
+            currentMeeting = nil
+            currentArtifacts = nil
             state = .idle
             return
         }
 
+        let recordingEndTime = Date()
         state = .transcribing
 
         // Transcribe
         var lines: [TranscriptLine] = []
         var fullText = ""
+        var transcriptionSucceeded = false
 
         do {
             let result = try await transcriptionService.transcribe(audioURL: audioURL)
             fullText = result.0
             lines = result.1
+            transcriptionSucceeded = true
         } catch {
             statusMessage = "Transcription: \(error.localizedDescription)"
             fullText = "(Transcription failed)"
         }
 
         // Save transcript
-        if let artifacts = currentArtifacts {
-            let markdown = buildMarkdown(
-                title: activeTitle ?? "Recording",
-                startTime: startTime ?? Date(),
-                endTime: Date(),
+        var didWriteTranscript = false
+        if let artifacts = currentArtifacts, let recordingStartTime = startTime {
+            let document = transcriptFormatter.makeDocument(
+                fallbackTitle: activeTitle,
+                startTime: recordingStartTime,
+                endTime: recordingEndTime,
+                audioSource: settingsStore.settings.audioSource,
+                meeting: currentMeeting,
                 fullText: fullText,
                 lines: lines
             )
-            try? storageService.writeTranscript(markdown, to: artifacts.transcriptURL)
+            let transcriptURL = storageService.transcriptURL(
+                folderBase: artifacts.transcriptURL.deletingLastPathComponent(),
+                title: document.title,
+                startTime: recordingStartTime
+            )
+            do {
+                try storageService.writeTranscript(document.markdown, to: transcriptURL)
+                didWriteTranscript = true
+            } catch {
+                statusMessage = "Save failed: \(error.localizedDescription)"
+            }
+        } else {
+            statusMessage = "Save failed: missing session artifacts."
         }
 
-        // Always delete audio
-        storageService.deleteFile(audioURL)
+        if transcriptionSucceeded && didWriteTranscript {
+            storageService.deleteFile(audioURL)
+        }
 
         // Reset
         startTime = nil
         activeTitle = nil
+        currentMeeting = nil
         currentArtifacts = nil
         state = .idle
 
@@ -167,65 +195,4 @@ final class MenuBarCoordinator: ObservableObject {
             : String(format: "%02d:%02d", m, s)
     }
 
-    // MARK: - Markdown
-
-    private func buildMarkdown(
-        title: String, startTime: Date, endTime: Date,
-        fullText: String, lines: [TranscriptLine]
-    ) -> String {
-        let dateFmt = DateFormatter()
-        dateFmt.dateFormat = "yyyy-MM-dd"
-        let timeFmt = DateFormatter()
-        timeFmt.dateFormat = "HH:mm"
-
-        // Collapse segments into sentences (group by ~5s windows)
-        let body: String
-        if lines.isEmpty {
-            body = fullText.isEmpty ? "(No transcript)" : fullText
-        } else {
-            body = collapseSegments(lines)
-        }
-
-        return """
-        # \(title)
-
-        \(dateFmt.string(from: startTime)) \(timeFmt.string(from: startTime))–\(timeFmt.string(from: endTime))
-
-        \(body)
-        """.replacingOccurrences(of: "        ", with: "")
-    }
-
-    private func collapseSegments(_ lines: [TranscriptLine]) -> String {
-        guard !lines.isEmpty else { return "" }
-
-        var result: [String] = []
-        var currentChunk: [String] = []
-        var chunkStart = lines[0].timestamp
-
-        for line in lines {
-            if line.timestamp - chunkStart > 5, !currentChunk.isEmpty {
-                let ts = formatTimestamp(chunkStart)
-                result.append("[\(ts)] \(currentChunk.joined(separator: " "))")
-                currentChunk = []
-                chunkStart = line.timestamp
-            }
-            currentChunk.append(line.text)
-        }
-
-        if !currentChunk.isEmpty {
-            let ts = formatTimestamp(chunkStart)
-            result.append("[\(ts)] \(currentChunk.joined(separator: " "))")
-        }
-
-        return result.joined(separator: "\n\n")
-    }
-
-    private func formatTimestamp(_ seconds: TimeInterval) -> String {
-        let h = Int(seconds) / 3600
-        let m = (Int(seconds) % 3600) / 60
-        let s = Int(seconds) % 60
-        return h > 0
-            ? String(format: "%d:%02d:%02d", h, m, s)
-            : String(format: "%02d:%02d", m, s)
-    }
 }

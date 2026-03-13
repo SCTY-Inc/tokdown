@@ -11,8 +11,8 @@ final class RecordingService {
         if status == .denied || status == .restricted { return false }
 
         return await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                AVCaptureDevice.requestAccess(for: .audio) { granted in
+            AVCaptureDevice.requestAccess(for: .audio) { granted in
+                Task { @MainActor in
                     continuation.resume(returning: granted)
                 }
             }

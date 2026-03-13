@@ -23,6 +23,9 @@ Core product constraints:
 ├── CLAUDE.md
 ├── scripts/
 │   └── build-app.sh
+├── Tests/
+│   └── TokDownTests/
+│       └── TranscriptFormatterTests.swift
 └── Sources/
     └── TokDown/
         ├── TokDownApp.swift
@@ -32,6 +35,7 @@ Core product constraints:
         ├── SystemAudioService.swift
         ├── RecordingService.swift
         ├── TranscriptionService.swift
+        ├── TranscriptFormatter.swift
         ├── CalendarService.swift
         ├── StorageService.swift
         ├── SettingsStore.swift
@@ -49,6 +53,7 @@ Core product constraints:
 - `Sources/TokDown/SystemAudioService.swift` — system audio capture via ScreenCaptureKit
 - `Sources/TokDown/RecordingService.swift` — microphone capture fallback
 - `Sources/TokDown/TranscriptionService.swift` — Apple SpeechTranscriber pipeline
+- `Sources/TokDown/TranscriptFormatter.swift` — front matter, title inference, and markdown rendering
 - `Sources/TokDown/StorageService.swift` — transcript output and cleanup
 - `Sources/TokDown/CalendarService.swift` — upcoming meetings and calendar permissions
 - `scripts/build-app.sh` — build, bundle, sign, and zip release artifact
@@ -80,11 +85,12 @@ Artifacts:
 
 ## Build, test, and lint commands
 
-There is no separate test suite or lint setup yet.
+There is no lint setup yet, but there is a small XCTest suite covering transcript formatting.
 
 Use these checks before submitting changes:
 
 ```bash
+swift test
 swift build -c debug
 bash scripts/build-app.sh debug
 bash scripts/build-app.sh release
@@ -154,6 +160,7 @@ A change is done when:
 Minimum verification:
 
 ```bash
+swift test
 swift build -c debug
 bash scripts/build-app.sh debug
 ```
@@ -169,6 +176,8 @@ Manual verification checklist:
 - menu bar icon appears correctly
 - recording can start and stop
 - transcript markdown is written to the chosen folder
+- selected meetings add calendar front matter to the transcript
+- transcript filenames stay date-first and use a meaningful title instead of a generic `Recording`
 - audio file is deleted after transcription
 - settings window opens and saves changes
 - permission prompts still make sense for the changed workflow
@@ -178,6 +187,29 @@ Manual verification checklist:
 Expected output shape:
 
 ```markdown
+---
+title: "Meeting Title"
+source: "calendar_selection"
+calendar_provider: "apple_calendar"
+audio_source: "system_audio"
+recording_started_at: "2026-03-09T14:00:00-04:00"
+recording_ended_at: "2026-03-09T14:30:00-04:00"
+calendar: "Work"
+event_id: "abc123"
+event_start: "2026-03-09T14:00:00-04:00"
+event_end: "2026-03-09T14:30:00-04:00"
+location: "Zoom"
+url: "https://zoom.us/j/123"
+organizer:
+  name: "Jane Doe"
+  email: "jane@example.com"
+attendees:
+  - name: "Jane Doe"
+    email: "jane@example.com"
+notes: |
+  Agenda and invite notes.
+---
+
 # Meeting Title
 
 2026-03-09 14:00–14:30
@@ -186,5 +218,7 @@ Expected output shape:
 
 [00:10] Next chunk continues here with natural grouping.
 ```
+
+Manual recordings keep the same markdown structure but omit calendar-specific fields and infer a better title from the transcript when possible.
 
 Keep this format stable unless there is a clear product reason to change it, and document any format change in `README.md`.
