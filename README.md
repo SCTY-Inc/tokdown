@@ -1,99 +1,59 @@
 # TokDown
 
+<img src="icon.png" width="128" alt="TokDown app icon">
+
 **Talk in. Markdown out.**
 
-TokDown is a macOS menu bar app that captures system audio and turns it into agent-ready markdown.
+TokDown is a macOS menu bar app that records system audio and transcribes it to markdown — entirely on-device, using Apple's new [SpeechTranscriber](https://developer.apple.com/documentation/speech/speechtranscriber) API introduced in macOS Tahoe (macOS 26).
 
-It uses Apple’s newer on-device transcription pipeline on macOS 26, keeps processing local, and deletes audio after transcription so you keep the transcript, not the recording archive.
+## Apple's on-device transcription (WWDC 2025, macOS 26 Tahoe)
 
-The app target is still intentionally small at roughly 1.2k lines of Swift, with a small XCTest suite covering transcript formatting.
+At WWDC in June 2025, Apple introduced [SpeechTranscriber](https://developer.apple.com/documentation/speech/speechtranscriber) — a ground-up replacement for the decade-old `SFSpeechRecognizer`. It shipped with macOS 26 Tahoe in fall 2025. TokDown is built on it.
+
+### Why this matters
+
+|  | Whisper (local) | Whisper API (OpenAI) | Otter / Fireflies | **TokDown** |
+|---|---|---|---|---|
+| Install | Python + ~3 GB model | None (API call) | None (SaaS) | **None — macOS has the model** |
+| Speed (30 min audio) | 3-10 min | ~1 min | Real-time | **~30-45 sec** |
+| Cost | Free | ~$0.18/hr | $8-24/mo | **Free** |
+| Audio leaves your Mac | No | Yes | Yes | **No** |
+| Quality (vs Whisper Large V3) | Baseline | Baseline | Comparable | **Comparable** |
+| Languages | 99 | 57 | ~30 | **41** |
+| Dependencies | Python, ffmpeg, model weights | API key | Account + subscription | **None** |
+
+The model runs on the Neural Engine. macOS downloads the language model on first use (~150 MB, shared across all apps) and updates it automatically. No Python, no Homebrew, no Docker, no model files to manage.
+
+Quality is comparable to Whisper Large V3 on conversational speech. It handles distant-mic scenarios well — meetings where you're not wearing a headset. Proper nouns are the main weakness, same as every other engine.
+
+41 languages supported including English, Spanish, French, German, Japanese, Korean, Mandarin, Cantonese, Portuguese, Arabic, and more.
 
 ## Why TokDown
 
-Most transcription tools create another silo. TokDown creates plain markdown you can search, version, summarize, commit, and feed directly into your agents.
+Most transcription tools trap your notes in another app or SaaS dashboard. TokDown writes plain markdown files to a folder — searchable, versionable, and ready to feed into agents, prompts, and automations.
 
-### Built for agent workflows
-
-- capture meetings, calls, demos, and research audio
-- save clean markdown instead of trapping notes in another app
-- keep transcripts local and easy to pass into prompts, tools, and automations
-- avoid API keys, cloud upload, and audio-file sprawl
+- Record meetings, calls, demos, and research audio from system audio
+- Get timestamped markdown with YAML front matter (calendar metadata, attendees, links)
+- No audio files kept — transcription in, markdown out, audio deleted
+- No dependencies, no accounts, no API keys
+- ~1,200 lines of Swift, no external packages
 
 ## How it works
 
-1. Launch TokDown
-2. Click the menu bar icon
-3. Pick an upcoming meeting or start recording immediately
-4. Stop when you're done
-5. TokDown transcribes locally and saves a timestamped `.md` file with YAML front matter
-6. The recorded audio file is deleted automatically
+1. Click the menu bar icon
+2. Pick an upcoming calendar meeting or start recording immediately
+3. Stop when done
+4. TokDown transcribes and saves a `.md` file — typically in under a minute
+5. The audio file is deleted automatically
 
-By default, transcripts are saved to:
-
-```text
-~/Documents/Transcripts/
-```
-
-Example files:
+Transcripts are saved to `~/Documents/Transcripts/` by default:
 
 ```text
 2026-03-09_17-38_Standup.md
 2026-03-09_18-00_Quarterly_planning_kickoff.md
 ```
 
-Meeting-backed recordings keep the selected calendar title. The menu shows up to three upcoming meetings across all accessible calendars over the next week. If you record without picking a meeting, TokDown infers a better title from the transcript text when it can, and falls back to the selected audio source name instead of a generic `Recording` label.
-
-## Features
-
-- **System audio capture** via ScreenCaptureKit
-- **Apple SpeechTranscriber transcription** with downloadable on-device assets
-- **Timestamped markdown output** with YAML front matter for downstream agent workflows
-- **Calendar integration** for quick meeting targeting and invite metadata capture
-- **No audio files retained** after transcript generation
-- **No API keys or external services**
-- **Custom menu bar status icon** for idle, recording, and transcribing states
-
-## Requirements
-
-- macOS 26+
-- Xcode 15+
-
-## Build from source
-
-```bash
-swift test
-bash scripts/build-app.sh debug
-open TokDown.app
-```
-
-TokDown is a menu bar app, so it does not show a dock icon after launch. It lives in the menu bar.
-
-To create a release build and zip archive:
-
-```bash
-bash scripts/build-app.sh release
-```
-
-This produces:
-
-- `TokDown.app`
-- `TokDown.app.zip`
-
-## Install from GitHub Releases
-
-1. Download the latest `TokDown.app.zip` from the Releases page
-2. Unzip it
-3. Move `TokDown.app` to `/Applications`
-4. Launch it
-5. If macOS warns on first run, use right-click → **Open**
-
-## Permissions
-
-On first use, macOS will ask for permissions depending on your workflow:
-
-- **Screen Recording** — required for system audio capture
-- **Speech Recognition** — required for transcription
-- **Calendar** — optional, used to show upcoming meetings
+Meeting recordings use the calendar event title. Manual recordings infer a title from the transcript text.
 
 ## Transcript format
 
@@ -101,12 +61,10 @@ On first use, macOS will ask for permissions depending on your workflow:
 ---
 title: "Standup"
 source: "calendar_selection"
-calendar_provider: "apple_calendar"
 audio_source: "system_audio"
 recording_started_at: "2026-03-09T14:00:00-04:00"
 recording_ended_at: "2026-03-09T14:30:00-04:00"
 calendar: "Work"
-event_id: "abc123"
 event_start: "2026-03-09T14:00:00-04:00"
 event_end: "2026-03-09T14:30:00-04:00"
 location: "Zoom"
@@ -132,25 +90,53 @@ notes: |
 [00:10] Next chunk continues here with natural grouping.
 ```
 
-Manual recordings use the same markdown shape, but only include the generic recording fields and omit calendar-specific keys.
+Manual recordings use the same shape but omit calendar-specific fields.
 
-The output is intentionally simple:
+## Requirements
 
-- plain markdown with structured front matter
-- easy to diff and version
-- easy to summarize with agents
-- easy to archive in a folder, repo, or notes system
+- macOS 26+ (Tahoe)
+- Apple Silicon or Intel Mac with Neural Engine support
+
+## Build from source
+
+```bash
+swift test
+bash scripts/build-app.sh debug
+open TokDown.app
+```
+
+TokDown is a menu bar app — it lives in the menu bar, not the Dock.
+
+Release build:
+
+```bash
+bash scripts/build-app.sh release
+```
+
+## Install from GitHub Releases
+
+1. Download `TokDown.app.zip` from the [Releases](../../releases) page
+2. Unzip and move `TokDown.app` to `/Applications`
+3. Launch — if macOS warns on first run, right-click → **Open**
+
+## Permissions
+
+On first launch, macOS will prompt for:
+
+- **Screen Recording** — captures system audio via ScreenCaptureKit
+- **Speech Recognition** — runs the on-device transcription model
+- **Calendar** (optional) — shows upcoming meetings in the menu
 
 ## Stack
 
-Swift 6, SwiftUI, Swift Package Manager. No external dependencies.
+~1,200 lines of Swift 6. No external dependencies.
 
-Frameworks:
-
-- ScreenCaptureKit
-- AVFoundation
-- Speech
-- EventKit
+| Framework | Purpose |
+|---|---|
+| Speech (SpeechTranscriber) | On-device transcription — new in macOS 26 |
+| ScreenCaptureKit | System audio capture |
+| AVFoundation | Audio recording and file I/O |
+| EventKit | Calendar meeting integration |
 
 ## Architecture
 
@@ -161,31 +147,18 @@ Sources/TokDown/
 ├── MenuBarIconView.swift       # Custom menu bar icon states
 ├── MenuBarViews.swift          # Menu bar + Settings window
 ├── SystemAudioService.swift    # ScreenCaptureKit audio capture
-├── RecordingService.swift      # AVAudioRecorder (mic mode)
-├── TranscriptionService.swift  # Apple SpeechTranscriber pipeline
+├── RecordingService.swift      # AVAudioRecorder (mic fallback)
+├── TranscriptionService.swift  # SpeechTranscriber + SpeechAnalyzer pipeline
 ├── TranscriptFormatter.swift   # Front matter + markdown rendering
-├── StorageService.swift        # File output
+├── StorageService.swift        # File output and audio cleanup
 ├── CalendarService.swift       # EventKit meetings
+├── SettingsStore.swift         # User preferences
 ├── AppModels.swift             # Data types
 └── Resources/
     ├── Info.plist
     ├── TokDown.entitlements
-    └── TokDownIcon.svg         # Starter app icon concept source
-
-Tests/TokDownTests/
-└── TranscriptFormatterTests.swift  # Transcript front matter + title inference coverage
+    └── TokDownIcon.svg         # App icon source (→ .icns at build time)
 ```
-
-## Current status
-
-TokDown is ready for GitHub distribution as a signed app bundle packaged from the build script.
-
-Planned polish:
-
-- proper `.icns` app icon generation
-- notarized public releases
-- better transcript post-processing for agent ingestion
-- screenshots and demo media
 
 ## License
 

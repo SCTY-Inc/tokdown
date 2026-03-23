@@ -1,6 +1,9 @@
 .DS_Store
 .build/
 .swiftpm/
+.claude/
+.codex/
+.openclaw/
 MenuBarRecorder.app/
 TokDown.app/
 TokDown.app.zip

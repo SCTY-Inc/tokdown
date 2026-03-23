@@ -53,7 +53,34 @@ cp "$INFO_PLIST_SOURCE" "${APP_BUNDLE_PATH}/Contents/Info.plist"
 cp "${PROJECT_DIR}/Sources/${TARGET_NAME}/Resources/TokDownMenuIdle.svg" "${APP_BUNDLE_PATH}/Contents/Resources/" || true
 cp "${PROJECT_DIR}/Sources/${TARGET_NAME}/Resources/TokDownMenuRecording.svg" "${APP_BUNDLE_PATH}/Contents/Resources/" || true
 cp "${PROJECT_DIR}/Sources/${TARGET_NAME}/Resources/TokDownMenuTranscribing.svg" "${APP_BUNDLE_PATH}/Contents/Resources/" || true
-cp "${PROJECT_DIR}/Sources/${TARGET_NAME}/Resources/TokDownIcon.svg" "${APP_BUNDLE_PATH}/Contents/Resources/" || true
+
+# Generate .icns from SVG (macOS-native toolchain, no deps)
+ICON_SVG="${PROJECT_DIR}/Sources/${TARGET_NAME}/Resources/TokDownIcon.svg"
+ICONSET_DIR="${PROJECT_DIR}/.build/TokDown.iconset"
+ICNS_FILE="${APP_BUNDLE_PATH}/Contents/Resources/TokDown.icns"
+
+if [[ -f "$ICON_SVG" ]]; then
+  echo "Generating app icon..."
+  rm -rf "$ICONSET_DIR"
+  mkdir -p "$ICONSET_DIR"
+
+  # Rasterize SVG to 1024px PNG via qlmanage (ships with macOS)
+  MASTER_PNG="${PROJECT_DIR}/.build/icon_master_1024.png"
+  qlmanage -t -s 1024 -o "${PROJECT_DIR}/.build" "$ICON_SVG" >/dev/null 2>&1
+  mv "${PROJECT_DIR}/.build/TokDownIcon.svg.png" "$MASTER_PNG"
+
+  # Generate all required sizes for macOS .iconset
+  for size in 16 32 128 256 512; do
+    sips -z $size $size "$MASTER_PNG" --out "${ICONSET_DIR}/icon_${size}x${size}.png" >/dev/null 2>&1
+    double=$((size * 2))
+    sips -z $double $double "$MASTER_PNG" --out "${ICONSET_DIR}/icon_${size}x${size}@2x.png" >/dev/null 2>&1
+  done
+
+  # Pack into .icns
+  iconutil -c icns -o "$ICNS_FILE" "$ICONSET_DIR"
+  rm -rf "$ICONSET_DIR" "$MASTER_PNG"
+  echo "Generated: $ICNS_FILE"
+fi
 
 /usr/libexec/PlistBuddy -c "Add :NSPrincipalClass string NSApplication" \
   "${APP_BUNDLE_PATH}/Contents/Info.plist" >/dev/null 2>&1 || true

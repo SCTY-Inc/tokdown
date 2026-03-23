@@ -17,7 +17,7 @@
     <key>CFBundleDisplayName</key>
     <string>TokDown</string>
     <key>CFBundleIconFile</key>
-    <string>TokDownIcon</string>
+    <string>TokDown</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>TokDown uses the microphone to capture interviews and meetings.</string>
 <key>NSCalendarsUsageDescription</key>
