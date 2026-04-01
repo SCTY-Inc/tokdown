@@ -1,0 +1,123 @@
+import SwiftUI
+
+/// Settings screen: GitHub PAT, recording mode, connection status, app version.
+struct SettingsView: View {
+
+    @EnvironmentObject var session: SessionManager
+    @State private var patInput: String = ""
+    @State private var showPATSaved = false
+
+    private let github = GitHubSync()
+
+    var body: some View {
+        Form {
+            Section("GitHub") {
+                SecureField("Personal Access Token", text: $patInput)
+                    .textContentType(.password)
+                    .autocorrectionDisabled()
+
+                Button(action: savePAT) {
+                    HStack {
+                        Text("Save Token")
+                        if showPATSaved {
+                            Spacer()
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                        }
+                    }
+                }
+                .disabled(patInput.isEmpty)
+
+                LabeledContent("Target") {
+                    Text("amadad/agents")
+                        .foregroundStyle(.secondary)
+                }
+                LabeledContent("Path") {
+                    Text(session.settings.transcriptRepoPath)
+                        .foregroundStyle(.secondary)
+                }
+
+                Toggle("Auto-push after recording", isOn: $session.settings.autoPushEnabled)
+            }
+
+            Section("Recording") {
+                Picker("Mode", selection: $session.settings.recordingMode) {
+                    ForEach(SessionManager.RecordingMode.allCases, id: \.self) { mode in
+                        Text(mode.rawValue.capitalized).tag(mode)
+                    }
+                }
+            }
+
+            Section("Connection") {
+                LabeledContent("Status") {
+                    HStack(spacing: 6) {
+                        Image(systemName: "circle.fill")
+                            .font(.system(size: 8))
+                            .foregroundStyle(statusColor)
+                        Text(statusText)
+                    }
+                }
+
+                if let name = session.ble.peripheralName {
+                    LabeledContent("Device") {
+                        Text(name)
+                    }
+                }
+
+                if let battery = session.ble.batteryLevel {
+                    LabeledContent("Battery") {
+                        Text("\(battery)%")
+                    }
+                }
+            }
+
+            Section("About") {
+                LabeledContent("App") {
+                    Text("TokDown Mobile")
+                }
+                LabeledContent("Version") {
+                    Text(appVersion)
+                }
+            }
+        }
+        .navigationTitle("Settings")
+    }
+
+    // MARK: - Actions
+
+    private func savePAT() {
+        Task {
+            try? await github.savePAT(patInput)
+            session.settings.hasGitHubPAT = true
+            patInput = ""
+            showPATSaved = true
+            try? await Task.sleep(for: .seconds(2))
+            showPATSaved = false
+        }
+    }
+
+    // MARK: - Computed
+
+    private var statusColor: Color {
+        switch session.ble.connectionState {
+        case .connected: .green
+        case .scanning, .connecting: .orange
+        case .disconnected: .red
+        }
+    }
+
+    private var statusText: String {
+        switch session.ble.connectionState {
+        case .connected: "Connected"
+        case .scanning: "Scanning"
+        case .connecting: "Connecting"
+        case .disconnected: "Disconnected"
+        }
+    }
+
+    private var appVersion: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String
+        return [version, build].compactMap { $0 }.joined(separator: " (") + (build != nil ? ")" : "")
+    }
+}
