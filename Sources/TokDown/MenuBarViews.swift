@@ -13,42 +13,53 @@ struct MenuBarContentView: View {
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.secondary)
                 }
-                Button("Stop Recording") {
-                    Task { await coordinator.stopRecording() }
+                Button(action: { Task { await coordinator.stopRecording() } }) {
+                    Label("Stop Recording", systemImage: "stop.circle")
                 }
             } else if coordinator.state == .transcribing {
-                Text("Transcribing...")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Label {
+                    Text("Transcribing...")
+                } icon: {
+                    Image(systemName: "text.badge.checkmark")
+                }
+                .foregroundStyle(.secondary)
             } else {
                 if !coordinator.upcomingMeetings.isEmpty {
                     ForEach(coordinator.upcomingMeetings) { meeting in
-                        Button("\(meeting.title)  \(meeting.timeWindowLabel)") {
+                        Button(action: {
                             Task { await coordinator.startRecording(meeting: meeting) }
+                        }) {
+                            Label {
+                                Text("\(meeting.title)  \(meeting.timeWindowLabel)")
+                            } icon: {
+                                Image(systemName: "calendar")
+                            }
                         }
                     }
 
                     Divider()
+                }
 
-                    Button("Record") {
-                        Task { await coordinator.startRecording() }
-                    }
-                } else {
-                    Button("Record") {
-                        Task { await coordinator.startRecording() }
-                    }
+                Button(action: { Task { await coordinator.startRecording() } }) {
+                    Label("Record", systemImage: "waveform")
                 }
             }
 
             Divider()
 
-            Button("Open Folder") { coordinator.openRecordingsFolder() }
-
-            Button("Settings") {
-                SettingsWindowManager.shared.show(settingsStore: settingsStore)
+            Button(action: { coordinator.openRecordingsFolder() }) {
+                Label("Open Folder", systemImage: "folder")
             }
 
-            Button("Quit") { NSApplication.shared.terminate(nil) }
+            Button(action: {
+                SettingsWindowManager.shared.show(settingsStore: settingsStore)
+            }) {
+                Label("Settings", systemImage: "gear")
+            }
+
+            Button(action: { NSApplication.shared.terminate(nil) }) {
+                Label("Quit", systemImage: "xmark.circle")
+            }
 
             if let msg = coordinator.statusMessage {
                 Text(msg).font(.caption).foregroundStyle(.red)

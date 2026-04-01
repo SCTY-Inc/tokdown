@@ -135,6 +135,7 @@ Do not:
 - add third-party dependencies casually
 - keep raw audio files by default
 - break system-audio capture to optimize for mic-only workflows
+
 - commit generated app bundles or release zip files to git unless explicitly requested
 - use `rm`; use safer alternatives if file removal is needed
 
