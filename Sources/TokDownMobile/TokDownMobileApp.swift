@@ -9,6 +9,9 @@ struct TokDownMobileApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(appState.session)
+                .environmentObject(appState.ble)
+                .environmentObject(appState.transcription)
+                .environmentObject(appState.calendar)
                 .task {
                     await appState.requestPermissions()
                 }
@@ -33,7 +36,19 @@ final class AppState: ObservableObject {
 
     func requestPermissions() async {
         ble.startScanning()
-        _ = await transcription.requestAuthorization()
-        _ = await calendar.requestAccess()
+
+        let speechAuthorized = await transcription.requestAuthorization()
+        let calendarAuthorized = await calendar.requestAccess()
+
+        var errors: [String] = []
+        if !speechAuthorized {
+            errors.append("Speech access denied")
+        }
+        if settings.recordingMode == .calendar && !calendarAuthorized {
+            errors.append("Calendar access denied")
+        }
+
+        session.lastError = errors.isEmpty ? nil : errors.joined(separator: " • ")
+        session.applySettings()
     }
 }

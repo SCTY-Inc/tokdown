@@ -4,6 +4,7 @@ import SwiftUI
 struct SettingsView: View {
 
     @EnvironmentObject var session: SessionManager
+    @EnvironmentObject var ble: PendantBLE
     @State private var patInput: String = ""
     @State private var showPATSaved = false
 
@@ -38,6 +39,10 @@ struct SettingsView: View {
                 }
 
                 Toggle("Auto-push after recording", isOn: $session.settings.autoPushEnabled)
+
+                Text("When auto-push is off, transcripts are still saved locally in the app's Documents/Transcripts folder.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Recording") {
@@ -58,16 +63,21 @@ struct SettingsView: View {
                     }
                 }
 
-                if let name = session.ble.peripheralName {
+                if let name = ble.peripheralName {
                     LabeledContent("Device") {
                         Text(name)
                     }
                 }
 
-                if let battery = session.ble.batteryLevel {
+                if let battery = ble.batteryLevel {
                     LabeledContent("Battery") {
                         Text("\(battery)%")
                     }
+                }
+
+                LabeledContent("Streaming") {
+                    Text(ble.isStreaming ? "Active" : "Inactive")
+                        .foregroundStyle(ble.isStreaming ? .green : .secondary)
                 }
             }
 
@@ -81,25 +91,35 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        .onAppear {
+            session.applySettings()
+        }
+        .onChange(of: session.settings.recordingMode) { _, newValue in
+            session.setRecordingMode(newValue)
+        }
     }
 
     // MARK: - Actions
 
     private func savePAT() {
         Task {
-            try? await github.savePAT(patInput)
-            session.settings.hasGitHubPAT = true
-            patInput = ""
-            showPATSaved = true
-            try? await Task.sleep(for: .seconds(2))
-            showPATSaved = false
+            do {
+                try await github.savePAT(patInput)
+                session.settings.hasGitHubPAT = true
+                patInput = ""
+                showPATSaved = true
+                try? await Task.sleep(for: .seconds(2))
+                showPATSaved = false
+            } catch {
+                session.lastError = "Couldn't save GitHub token: \(error.localizedDescription)"
+            }
         }
     }
 
     // MARK: - Computed
 
     private var statusColor: Color {
-        switch session.ble.connectionState {
+        switch ble.connectionState {
         case .connected: .green
         case .scanning, .connecting: .orange
         case .disconnected: .red
@@ -107,7 +127,7 @@ struct SettingsView: View {
     }
 
     private var statusText: String {
-        switch session.ble.connectionState {
+        switch ble.connectionState {
         case .connected: "Connected"
         case .scanning: "Scanning"
         case .connecting: "Connecting"

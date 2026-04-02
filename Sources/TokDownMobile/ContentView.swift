@@ -4,6 +4,9 @@ import SwiftUI
 struct ContentView: View {
 
     @EnvironmentObject var session: SessionManager
+    @EnvironmentObject var ble: PendantBLE
+    @EnvironmentObject var transcription: TranscriptionService
+    @EnvironmentObject var calendar: CalendarService
 
     var body: some View {
         NavigationStack {
@@ -59,7 +62,7 @@ struct ContentView: View {
 
             Spacer()
 
-            if let battery = session.ble.batteryLevel {
+            if let battery = ble.batteryLevel {
                 Label("\(battery)%", systemImage: batteryIcon(battery))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -77,9 +80,9 @@ struct ContentView: View {
     }
 
     private var connectionLabel: String {
-        switch session.ble.connectionState {
+        switch ble.connectionState {
         case .connected:
-            session.ble.peripheralName ?? "Connected"
+            ble.peripheralName ?? "Connected"
         case .scanning:
             "Scanning..."
         case .connecting:
@@ -90,7 +93,7 @@ struct ContentView: View {
     }
 
     private var connectionColor: Color {
-        switch session.ble.connectionState {
+        switch ble.connectionState {
         case .connected: .green
         case .scanning, .connecting: .orange
         case .disconnected: .red
@@ -126,8 +129,8 @@ struct ContentView: View {
                     .font(.body)
             }
 
-            if !session.transcription.fullText.isEmpty {
-                Text(session.transcription.fullText.suffix(200))
+            if !transcription.fullText.isEmpty {
+                Text(transcription.fullText.suffix(200))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
@@ -181,7 +184,7 @@ struct ContentView: View {
                 .padding(.vertical, 8)
         }
         .buttonStyle(.borderedProminent)
-        .disabled(session.ble.connectionState != .connected)
+        .disabled(ble.connectionState != .connected)
     }
 
     // MARK: - Upcoming Meetings
@@ -191,12 +194,12 @@ struct ContentView: View {
             Label("Upcoming", systemImage: "calendar")
                 .font(.headline)
 
-            if session.calendar.upcomingMeetings.isEmpty {
+            if calendar.upcomingMeetings.isEmpty {
                 Text("No upcoming meetings")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(session.calendar.upcomingMeetings) { meeting in
+                ForEach(calendar.upcomingMeetings) { meeting in
                     Button(action: { session.startRecording(meeting: meeting) }) {
                         HStack {
                             Image(systemName: "circle")
@@ -212,7 +215,7 @@ struct ContentView: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .disabled(session.ble.connectionState != .connected)
+                    .disabled(ble.connectionState != .connected)
                 }
             }
         }
@@ -231,20 +234,26 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(session.recentTranscripts) { transcript in
-                    HStack {
-                        Image(systemName: transcript.pushed
-                              ? "checkmark.circle.fill"
-                              : "checkmark.circle")
-                            .font(.system(size: 12))
-                            .foregroundStyle(transcript.pushed ? .green : .secondary)
-                        Text(meetingTime(transcript.date))
-                            .font(.subheadline.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                        Text(transcript.title)
-                            .font(.subheadline)
-                            .lineLimit(1)
-                        Spacer()
+                    NavigationLink(destination: TranscriptDetailView(transcript: transcript)) {
+                        HStack {
+                            Image(systemName: transcript.pushed
+                                  ? "checkmark.circle.fill"
+                                  : "checkmark.circle")
+                                .font(.system(size: 12))
+                                .foregroundStyle(transcript.pushed ? .green : .secondary)
+                            Text(meetingTime(transcript.date))
+                                .font(.subheadline.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                            Text(transcript.title)
+                                .font(.subheadline)
+                                .lineLimit(1)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tertiary)
+                        }
                     }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -273,5 +282,42 @@ struct ContentView: View {
         let fmt = DateFormatter()
         fmt.dateFormat = "h:mm a"
         return fmt.string(from: date)
+    }
+}
+
+// MARK: - Transcript Detail View
+
+struct TranscriptDetailView: View {
+    let transcript: SessionManager.RecentTranscript
+    @State private var content: String = ""
+
+    var body: some View {
+        ScrollView {
+            if content.isEmpty {
+                Text("No content available")
+                    .foregroundStyle(.secondary)
+                    .padding()
+            } else {
+                Text(content)
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                    .padding()
+            }
+        }
+        .navigationTitle(transcript.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { loadContent() }
+    }
+
+    private func loadContent() {
+        guard let url = transcript.fileURL else {
+            content = "(File not available)"
+            return
+        }
+        do {
+            content = try String(contentsOf: url, encoding: .utf8)
+        } catch {
+            content = "(Could not read file: \(error.localizedDescription))"
+        }
     }
 }

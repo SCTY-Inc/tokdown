@@ -24,10 +24,6 @@ final class CalendarService: ObservableObject {
     private let eventStore = EKEventStore()
     private var refreshTimer: Timer?
 
-    deinit {
-        refreshTimer?.invalidate()
-    }
-
     /// Request calendar access.
     /// - Returns: true if full access granted
     func requestAccess() async -> Bool {
@@ -46,9 +42,9 @@ final class CalendarService: ObservableObject {
     }
 
     /// Fetch meetings for the next N hours.
-    /// - Parameter hours: Lookahead window (default 4)
+    /// - Parameter hours: Lookahead window (default 24)
     /// - Returns: Array of upcoming non-all-day meetings sorted by start time
-    func fetchUpcoming(hours: Int = 4) -> [Meeting] {
+    func fetchUpcoming(hours: Int = 24) -> [Meeting] {
         let now = Date()
         guard let endDate = Calendar.current.date(byAdding: .hour, value: hours, to: now) else {
             return []

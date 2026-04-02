@@ -1,0 +1,40 @@
+name: TokDownMobile
+options:
+  bundleIdPrefix: com.amadad
+configs:
+  Debug: debug
+  Release: release
+settings:
+  base:
+    SWIFT_VERSION: 6.0
+    IPHONEOS_DEPLOYMENT_TARGET: 18.0
+packages:
+  Opus:
+    url: https://github.com/alta/swift-opus
+    from: "0.0.2"
+targets:
+  TokDownMobile:
+    type: application
+    platform: iOS
+    deploymentTarget: "18.0"
+    dependencies:
+      - package: Opus
+    sources:
+      - path: Sources/TokDownMobile
+        excludes:
+          - "**/*.xcassets"
+      - path: Sources/TokDownMobile/Assets.xcassets
+        type: folder
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.amadad.tokdownmobile
+        PRODUCT_NAME: TokDownMobile
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Sources/TokDownMobile/Info.plist
+        CODE_SIGN_STYLE: Automatic
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 0.1.0
+        DEVELOPMENT_TEAM: 683DJ66L4U
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        TARGETED_DEVICE_FAMILY: "1"
