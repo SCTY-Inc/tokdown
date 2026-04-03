@@ -290,22 +290,56 @@ struct ContentView: View {
 struct TranscriptDetailView: View {
     let transcript: SessionManager.RecentTranscript
     @State private var content: String = ""
+    @State private var isEditing = false
+    @State private var saveStatus: String?
+
+    private let github = GitHubSync()
 
     var body: some View {
-        ScrollView {
-            if content.isEmpty {
-                Text("No content available")
-                    .foregroundStyle(.secondary)
-                    .padding()
-            } else {
-                Text(content)
+        Group {
+            if isEditing {
+                TextEditor(text: $content)
                     .font(.system(.body, design: .monospaced))
-                    .textSelection(.enabled)
-                    .padding()
+                    .padding(.horizontal, 4)
+            } else {
+                ScrollView {
+                    if content.isEmpty {
+                        Text("No content available")
+                            .foregroundStyle(.secondary)
+                            .padding()
+                    } else {
+                        Text(content)
+                            .font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                            .padding()
+                    }
+                }
             }
         }
         .navigationTitle(transcript.title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button(isEditing ? "Done" : "Edit") {
+                    if isEditing { saveContent() }
+                    isEditing.toggle()
+                }
+            }
+            if isEditing {
+                ToolbarItem(placement: .secondaryAction) {
+                    Button("Re-push to GitHub") { rePush() }
+                }
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if let status = saveStatus {
+                Text(status)
+                    .font(.caption)
+                    .padding(8)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+                    .padding(.bottom, 8)
+            }
+        }
         .onAppear { loadContent() }
     }
 
@@ -318,6 +352,41 @@ struct TranscriptDetailView: View {
             content = try String(contentsOf: url, encoding: .utf8)
         } catch {
             content = "(Could not read file: \(error.localizedDescription))"
+        }
+    }
+
+    private func saveContent() {
+        guard let url = transcript.fileURL else { return }
+        do {
+            try content.write(to: url, atomically: true, encoding: .utf8)
+            showStatus("Saved")
+        } catch {
+            showStatus("Save failed")
+        }
+    }
+
+    private func rePush() {
+        guard let url = transcript.fileURL else { return }
+        let filename = url.lastPathComponent
+        Task {
+            do {
+                try await github.push(
+                    filename: filename,
+                    content: content,
+                    commitMessage: "update: \(transcript.title)"
+                )
+                showStatus("Pushed")
+            } catch {
+                showStatus("Push failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func showStatus(_ text: String) {
+        saveStatus = text
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            saveStatus = nil
         }
     }
 }

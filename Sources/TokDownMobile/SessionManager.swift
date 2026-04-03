@@ -33,7 +33,7 @@ final class SessionManager: ObservableObject {
     let ble: PendantBLE
     let transcription: TranscriptionService
     private let formatter: TranscriptFormatter
-    private let github: GitHubSync
+    let pushQueue: PushQueue
     let calendar: CalendarService
     var settings: SettingsStore
 
@@ -58,14 +58,14 @@ final class SessionManager: ObservableObject {
         ble: PendantBLE,
         transcription: TranscriptionService,
         formatter: TranscriptFormatter = TranscriptFormatter(),
-        github: GitHubSync = GitHubSync(),
+        pushQueue: PushQueue = PushQueue(),
         calendar: CalendarService,
         settings: SettingsStore
     ) {
         self.ble = ble
         self.transcription = transcription
         self.formatter = formatter
-        self.github = github
+        self.pushQueue = pushQueue
         self.calendar = calendar
         self.settings = settings
         self.recordingMode = settings.recordingMode
@@ -108,6 +108,9 @@ final class SessionManager: ObservableObject {
         if opusDecoder == nil {
             lastError = "Opus decoder init failed — audio won't transcribe"
         }
+
+        // Feed vocabulary hints to speech recognizer
+        transcription.contextualStrings = settings.vocabularyHints
         transcription.startTranscription()
 
         audioSubscription = ble.opusFrames
@@ -147,8 +150,16 @@ final class SessionManager: ObservableObject {
 
         Task { @MainActor in
             let snapshot = await transcription.finishTranscription()
+
+            // Auto-title from transcript content if no title set
+            var resolvedTitle = title
+            if resolvedTitle.isEmpty, !snapshot.fullText.isEmpty {
+                resolvedTitle = autoTitle(from: snapshot.fullText)
+                currentTitle = resolvedTitle
+            }
+
             let doc = formatter.makeDocument(
-                title: title,
+                title: resolvedTitle,
                 startTime: startTime,
                 endTime: endTime,
                 meeting: meeting,
@@ -164,8 +175,7 @@ final class SessionManager: ObservableObject {
             }
 
             if settings.autoPushEnabled {
-                state = .pushing
-                await pushTranscript(doc: doc, startTime: startTime, fileURL: savedURL)
+                pushTranscript(doc: doc, startTime: startTime, fileURL: savedURL)
             } else {
                 addRecentTranscript(title: doc.title, date: startTime, pushed: false, fileURL: savedURL)
                 resetToIdle()
@@ -223,18 +233,13 @@ final class SessionManager: ObservableObject {
         doc: TranscriptFormatter.TranscriptDocument,
         startTime: Date,
         fileURL: URL? = nil
-    ) async {
-        do {
-            try await github.push(
-                filename: doc.filename,
-                content: doc.markdown,
-                commitMessage: "transcript: \(doc.title)"
-            )
-            addRecentTranscript(title: doc.title, date: startTime, pushed: true, fileURL: fileURL)
-        } catch {
-            lastError = "Push failed: \(error.localizedDescription)"
-            addRecentTranscript(title: doc.title, date: startTime, pushed: false, fileURL: fileURL)
-        }
+    ) {
+        pushQueue.enqueue(
+            filename: doc.filename,
+            content: doc.markdown,
+            commitMessage: "transcript: \(doc.title)"
+        )
+        addRecentTranscript(title: doc.title, date: startTime, pushed: true, fileURL: fileURL)
         resetToIdle()
     }
 
@@ -273,6 +278,17 @@ final class SessionManager: ObservableObject {
         disconnectGraceTimer?.invalidate()
         disconnectGraceTimer = nil
         deactivateAudioSession()
+    }
+
+    // MARK: - Auto-Title
+
+    private func autoTitle(from text: String) -> String {
+        let words = text.split(separator: " ").prefix(10)
+        var title = words.joined(separator: " ")
+        if title.count > 60 {
+            title = String(title.prefix(57)) + "..."
+        }
+        return title.isEmpty ? "Pendant Recording" : title
     }
 
     // MARK: - Background Audio Session

@@ -53,6 +53,23 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Vocabulary Hints") {
+                Text("Names, jargon, and terms to improve recognition accuracy.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                ForEach(session.settings.vocabularyHints.indices, id: \.self) { i in
+                    TextField("Term", text: $session.settings.vocabularyHints[i])
+                }
+                .onDelete { indices in
+                    session.settings.vocabularyHints.remove(atOffsets: indices)
+                }
+
+                Button("Add Term") {
+                    session.settings.vocabularyHints.append("")
+                }
+            }
+
             Section("Connection") {
                 LabeledContent("Status") {
                     HStack(spacing: 6) {

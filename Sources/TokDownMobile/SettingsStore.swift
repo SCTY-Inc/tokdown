@@ -25,9 +25,17 @@ final class SettingsStore: ObservableObject {
     /// Target repo path for transcripts
     let transcriptRepoPath = "intel/transcripts"
 
+    /// Vocabulary hints for speech recognition (names, jargon, products)
+    @Published var vocabularyHints: [String] {
+        didSet {
+            defaults.set(vocabularyHints, forKey: "vocabularyHints")
+        }
+    }
+
     init() {
         self.hasGitHubPAT = defaults.bool(forKey: "hasGitHubPAT")
         self.autoPushEnabled = defaults.bool(forKey: "autoPushEnabled")
+        self.vocabularyHints = defaults.stringArray(forKey: "vocabularyHints") ?? []
 
         let modeRaw = defaults.string(forKey: "recordingMode") ?? "manual"
         self.recordingMode = SessionManager.RecordingMode(rawValue: modeRaw) ?? .manual

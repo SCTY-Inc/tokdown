@@ -30,6 +30,9 @@ final class TranscriptionService: ObservableObject {
     /// How often to restart the recognition task (seconds).
     private let chunkDuration: TimeInterval = 45
 
+    /// Vocabulary hints for improved recognition (names, jargon, products).
+    var contextualStrings: [String] = []
+
     private var recognizer: SFSpeechRecognizer?
     private var audioFormat: AVAudioFormat?
 
@@ -187,6 +190,9 @@ final class TranscriptionService: ObservableObject {
         if #available(iOS 17, *) {
             request.addsPunctuation = true
         }
+        if !contextualStrings.isEmpty {
+            request.contextualStrings = contextualStrings
+        }
         return request
     }
 
@@ -298,6 +304,7 @@ final class TranscriptionService: ObservableObject {
 
     private func completeIfNeeded() {
         lines = committedLines + currentChunkLines
+        deduplicateChunkBoundaries()
         fullText = lines.map(\.text).joined(separator: " ")
 
         let result = snapshot()
@@ -326,5 +333,47 @@ final class TranscriptionService: ObservableObject {
 
     private func snapshot() -> Snapshot {
         Snapshot(fullText: fullText, lines: lines)
+    }
+
+    // MARK: - Chunk Boundary Deduplication
+
+    /// Remove duplicate words at chunk boundaries caused by audio overlap.
+    /// Compares last N words of one chunk with first N words of the next.
+    private func deduplicateChunkBoundaries() {
+        guard lines.count > 1 else { return }
+
+        var result: [TranscriptLine] = [lines[0]]
+        let words = 5 // compare window
+
+        for i in 1..<lines.count {
+            let prev = result.last?.text.lowercased().split(separator: " ").suffix(words) ?? []
+            let curr = lines[i].text.lowercased().split(separator: " ")
+
+            // Check if current line starts with words that match the end of previous line
+            if !prev.isEmpty, !curr.isEmpty {
+                var overlapLen = 0
+                for len in (1...min(prev.count, curr.count)).reversed() {
+                    if Array(prev.suffix(len)) == Array(curr.prefix(len)) {
+                        overlapLen = len
+                        break
+                    }
+                }
+
+                if overlapLen > 0 {
+                    // Trim the overlapping prefix from current line
+                    let trimmedWords = lines[i].text.split(separator: " ").dropFirst(overlapLen)
+                    if trimmedWords.isEmpty { continue } // entire line was duplicate
+                    result.append(TranscriptLine(
+                        timestamp: lines[i].timestamp,
+                        text: trimmedWords.joined(separator: " ")
+                    ))
+                    continue
+                }
+            }
+
+            result.append(lines[i])
+        }
+
+        lines = result
     }
 }
