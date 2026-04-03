@@ -109,49 +109,30 @@ final class PendantBLE: NSObject, ObservableObject, CBCentralManagerDelegate, CB
 
     /// After RX notify is confirmed, send the handshake commands to start audio streaming.
     private func startStreamingHandshake() {
-        guard let peripheral, let tx = txCharacteristic else {
-            print(">>> handshake FAILED: tx=\(txCharacteristic != nil) peripheral=\(self.peripheral != nil)")
-            return
-        }
+        guard let peripheral, let tx = txCharacteristic else { return }
 
-        // Always use .withResponse for Limitless Pendant
         let writeType: CBCharacteristicWriteType = .withResponse
-        print(">>> handshake starting (withResponse)")
 
         // Step 1: Wait 1s after subscribe, then send time sync
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             guard let self, let peripheral = self.peripheral, let tx = self.txCharacteristic else { return }
-            let syncCmd = LimitlessCommand.timeSync()
-            print(">>> writing timeSync (\(syncCmd.count) bytes)")
-            peripheral.writeValue(syncCmd, for: tx, type: writeType)
+            peripheral.writeValue(LimitlessCommand.timeSync(), for: tx, type: writeType)
 
             // Step 2: Wait 1s more, then enable data stream
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
                 guard let self, let peripheral = self.peripheral, let tx = self.txCharacteristic else { return }
-                let streamCmd = LimitlessCommand.enableDataStream()
-                print(">>> writing enableDataStream (\(streamCmd.count) bytes)")
-                peripheral.writeValue(streamCmd, for: tx, type: writeType)
+                peripheral.writeValue(LimitlessCommand.enableDataStream(), for: tx, type: writeType)
                 self.updateStreaming(true)
             }
         }
     }
 
     /// Process a raw BLE notification from the RX characteristic.
-    private var reassembledCount = 0
-    private var opusFrameCount = 0
-
     private func handleRxData(_ data: Data) {
         guard let payload = reassembler.process(notification: data) else { return }
 
-        reassembledCount += 1
         let frames = OpusFrameExtractor.extract(from: payload)
-
-        if reassembledCount <= 3 {
-            DebugLog.write("reassembled #\(reassembledCount) len=\(payload.count) frames=\(frames.count)")
-        }
-
         for frame in frames {
-            opusFrameCount += 1
             opusFrames.send(frame)
         }
     }
@@ -181,16 +162,13 @@ final class PendantBLE: NSObject, ObservableObject, CBCentralManagerDelegate, CB
     // MARK: - CBCentralManagerDelegate
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        print(">>> centralManagerDidUpdateState: \(central.state.rawValue) needsDiscovery=\(needsServiceDiscovery) peripheral=\(peripheral?.state.rawValue ?? -1)")
         switch central.state {
         case .poweredOn:
             if needsServiceDiscovery, let peripheral, peripheral.state == .connected {
                 needsServiceDiscovery = false
-                print(">>> rediscovering services on restored peripheral")
                 peripheral.discoverServices(nil)
             } else if let peripheral, peripheral.state == .connecting {
                 // Restored peripheral still connecting — wait for didConnect
-                print(">>> waiting for restored peripheral to finish connecting")
             } else {
                 beginScan(using: central)
             }
@@ -202,10 +180,8 @@ final class PendantBLE: NSObject, ObservableObject, CBCentralManagerDelegate, CB
     }
 
     func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {
-        print(">>> willRestoreState called")
         if let peripherals = dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral],
            let restored = peripherals.first {
-            print(">>> restoring peripheral: \(restored.name ?? "nil") state=\(restored.state.rawValue)")
             peripheral = restored
             restored.delegate = self
             updatePeripheralName(restored.name)
@@ -214,7 +190,6 @@ final class PendantBLE: NSObject, ObservableObject, CBCentralManagerDelegate, CB
                 updateConnectionState(.connected)
                 needsServiceDiscovery = true
             case .connecting:
-                // CB will continue connecting; didConnect will fire when done
                 updateConnectionState(.connecting)
             default:
                 updateConnectionState(.disconnected)
@@ -243,8 +218,7 @@ final class PendantBLE: NSObject, ObservableObject, CBCentralManagerDelegate, CB
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        print(">>> didConnect: \(peripheral.name ?? "nil") delegate=\(peripheral.delegate != nil)")
-        peripheral.delegate = self  // Ensure delegate is set after restoration
+        peripheral.delegate = self
         updateConnectionState(.connected)
         updatePeripheralName(peripheral.name)
         peripheral.discoverServices(nil)
@@ -264,10 +238,8 @@ final class PendantBLE: NSObject, ObservableObject, CBCentralManagerDelegate, CB
     // MARK: - CBPeripheralDelegate
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        print(">>> didDiscoverServices: \(peripheral.services?.count ?? 0) services, err=\(error?.localizedDescription ?? "none")")
         guard let services = peripheral.services else { return }
         for service in services {
-            print(">>>   service: \(service.uuid.uuidString)")
             peripheral.discoverCharacteristics(nil, for: service)
         }
     }
@@ -277,17 +249,13 @@ final class PendantBLE: NSObject, ObservableObject, CBCentralManagerDelegate, CB
         for char in characteristics {
             let uuid = char.uuid.uuidString.uppercased()
 
-            // Limitless pendant service
             if uuid == Self.txCharUUIDString {
-                print(">>> Found TX char")
                 txCharacteristic = char
             } else if uuid == Self.rxCharUUIDString {
-                print(">>> Found RX char, subscribing")
                 rxCharacteristic = char
                 peripheral.setNotifyValue(true, for: char)
             }
 
-            // Battery
             if uuid == Self.batteryLevelUUID {
                 peripheral.readValue(for: char)
                 if char.properties.contains(.notify) {
@@ -299,30 +267,14 @@ final class PendantBLE: NSObject, ObservableObject, CBCentralManagerDelegate, CB
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
         let uuid = characteristic.uuid.uuidString.uppercased()
-        print(">>> notify state: \(uuid) isNotifying=\(characteristic.isNotifying) err=\(error?.localizedDescription ?? "none")")
-        // Once RX notify is active, start the streaming handshake
         if uuid == Self.rxCharUUIDString, characteristic.isNotifying, error == nil {
-            print(">>> RX notify active, starting handshake")
             startStreamingHandshake()
         }
     }
 
-    func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
-        print(">>> write to \(characteristic.uuid.uuidString): err=\(error?.localizedDescription ?? "none")")
-    }
-
-    private var rxPacketCount = 0
-
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard error == nil, let data = characteristic.value else { return }
         let uuid = characteristic.uuid.uuidString.uppercased()
-
-        // Log ALL incoming data
-        rxPacketCount += 1
-        if rxPacketCount <= 10 || rxPacketCount % 200 == 0 {
-            let hex = data.prefix(20).map { String(format: "%02X", $0) }.joined(separator: " ")
-            print(">>> data #\(rxPacketCount) char=\(uuid.prefix(8)) len=\(data.count) hex=\(hex)")
-        }
 
         if uuid == Self.batteryLevelUUID {
             updateBatteryLevel(data.first.map(Int.init))

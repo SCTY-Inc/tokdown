@@ -6,8 +6,8 @@ import AVFoundation
 ///
 /// Uses chunked recognition to handle recordings of any length.
 /// SFSpeechRecognizer silently degrades after ~1 minute of continuous audio,
-/// so we restart the recognition task every `chunkDuration` seconds and
-/// stitch results with time offsets.
+/// so we restart the recognition task every `chunkDuration` seconds with
+/// audio overlap to avoid gaps at boundaries.
 @MainActor
 final class TranscriptionService: ObservableObject {
 
@@ -28,24 +28,37 @@ final class TranscriptionService: ObservableObject {
     private(set) var lines: [TranscriptLine] = []
 
     /// How often to restart the recognition task (seconds).
-    private let chunkDuration: TimeInterval = 30
+    private let chunkDuration: TimeInterval = 45
 
     private var recognizer: SFSpeechRecognizer?
-    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
-    private var recognitionTask: SFSpeechRecognitionTask?
     private var audioFormat: AVAudioFormat?
 
-    /// Seconds elapsed since recording started (drives chunk restarts).
-    private var recordingStartTime: Date?
+    // Current chunk state
+    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    private var recognitionTask: SFSpeechRecognitionTask?
     private var chunkStartOffset: TimeInterval = 0
+
+    // Double-buffer: next chunk's request is created before the current one ends
+    private var pendingRequest: SFSpeechAudioBufferRecognitionRequest?
+
+    // Timing
+    private var recordingStartTime: Date?
     private var chunkTimer: Timer?
 
-    /// Segments already captured from the current chunk's partial results.
-    private var currentChunkSegmentCount = 0
-
-    /// Buffer for batching small Opus frames into larger PCM buffers.
+    // Sample batching: accumulate small Opus frames before appending to recognizer
     private var sampleBuffer: [Int16] = []
     private static let batchSize = 1600 // 100ms at 16kHz (5 Opus frames)
+
+    // Overlap: keep last 1 second of audio to pre-fill next chunk
+    private var overlapBuffer: [Int16] = []
+    private static let overlapSamples = 16000 // 1 second at 16kHz
+
+    // Chunk line tracking
+    private var committedLines: [TranscriptLine] = []
+    private var currentChunkLines: [TranscriptLine] = []
+
+    // Track samples fed to current chunk (for short-chunk detection)
+    private var currentChunkSampleCount = 0
 
     // Finish flow
     private var finishContinuation: CheckedContinuation<Snapshot, Never>?
@@ -81,16 +94,16 @@ final class TranscriptionService: ObservableObject {
         currentChunkLines = []
         fullText = ""
         sampleBuffer = []
+        overlapBuffer = []
+        currentChunkSampleCount = 0
         recordingStartTime = Date()
         chunkStartOffset = 0
-        currentChunkSegmentCount = 0
         finishContinuation = nil
         finishTimeoutTask?.cancel()
         finishTimeoutTask = nil
 
         startChunk()
 
-        // Restart recognition every chunkDuration seconds
         chunkTimer = Timer.scheduledTimer(
             withTimeInterval: chunkDuration,
             repeats: true
@@ -104,9 +117,16 @@ final class TranscriptionService: ObservableObject {
     }
 
     func appendAudio(samples: [Int16]) {
-        guard recognitionRequest != nil, audioFormat != nil else { return }
+        // Feed to whichever request is active (current or pending during transition)
+        guard recognitionRequest != nil || pendingRequest != nil else { return }
+        guard audioFormat != nil else { return }
 
-        // Batch small frames into larger buffers to reduce overhead
+        // Maintain overlap buffer (last 1 second of audio)
+        overlapBuffer.append(contentsOf: samples)
+        if overlapBuffer.count > Self.overlapSamples {
+            overlapBuffer.removeFirst(overlapBuffer.count - Self.overlapSamples)
+        }
+
         sampleBuffer.append(contentsOf: samples)
         if sampleBuffer.count >= Self.batchSize {
             flushSampleBuffer()
@@ -119,14 +139,23 @@ final class TranscriptionService: ObservableObject {
         chunkTimer?.invalidate()
         chunkTimer = nil
 
-        // Flush any remaining audio
         flushSampleBuffer()
+
+        // If current chunk has very little audio (<2s), don't wait for it
+        let minSamplesForResult = 32000 // 2 seconds at 16kHz
+        if currentChunkSampleCount < minSamplesForResult {
+            // Commit what we have and return immediately
+            lines = committedLines + currentChunkLines
+            fullText = lines.map(\.text).joined(separator: " ")
+            teardown()
+            return snapshot()
+        }
 
         return await withCheckedContinuation { continuation in
             finishContinuation = continuation
             finishTimeoutTask?.cancel()
             finishTimeoutTask = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(5))
+                try? await Task.sleep(for: .seconds(8))
                 self?.forceCompleteIfNeeded()
             }
             recognitionRequest?.endAudio()
@@ -136,17 +165,12 @@ final class TranscriptionService: ObservableObject {
     // MARK: - Chunked Recognition
 
     private func startChunk() {
-        guard let recognizer, let audioFormat else { return }
+        guard let recognizer else { return }
 
-        let request = SFSpeechAudioBufferRecognitionRequest()
-        request.shouldReportPartialResults = true
-        request.requiresOnDeviceRecognition = true
-        if #available(iOS 17, *) {
-            request.addsPunctuation = true
-        }
-
+        let request = pendingRequest ?? makeRequest()
+        pendingRequest = nil
         recognitionRequest = request
-        currentChunkSegmentCount = 0
+        currentChunkSampleCount = 0
 
         let offset = chunkStartOffset
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
@@ -156,41 +180,51 @@ final class TranscriptionService: ObservableObject {
         }
     }
 
-    /// Finalize current chunk and start a new one.
+    private func makeRequest() -> SFSpeechAudioBufferRecognitionRequest {
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.shouldReportPartialResults = true
+        request.requiresOnDeviceRecognition = true
+        if #available(iOS 17, *) {
+            request.addsPunctuation = true
+        }
+        return request
+    }
+
+    /// Finalize current chunk and start a new one with seamless transition.
     private func restartChunk() {
         guard isTranscribing, finishContinuation == nil else { return }
 
-        // Flush pending audio and end current request
-        flushSampleBuffer()
-        recognitionRequest?.endAudio()
-
-        // Commit current chunk's lines so they're preserved
-        committedLines = lines
-
-        let oldTask = recognitionTask
-        let oldRequest = recognitionRequest
+        // Commit current chunk's lines
+        committedLines = committedLines + currentChunkLines
+        currentChunkLines = []
 
         // Update offset for the next chunk
         if let start = recordingStartTime {
             chunkStartOffset = Date().timeIntervalSince(start)
         }
 
-        // Brief pause for recognizer to finalize, then start new chunk
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            guard let self, self.isTranscribing else { return }
-            oldTask?.cancel()
-            _ = oldRequest
-            self.currentChunkLines = []
-            self.startChunk()
+        // Create next request BEFORE ending current one (double-buffer)
+        let nextRequest = makeRequest()
+        pendingRequest = nextRequest
+
+        // Pre-fill the next request with overlap audio (last ~1 second)
+        if !overlapBuffer.isEmpty {
+            feedSamples(overlapBuffer, to: nextRequest)
         }
+
+        // Flush remaining audio to current request, then end it
+        flushSampleBuffer()
+        recognitionRequest?.endAudio()
+
+        let oldTask = recognitionTask
+
+        // Start new chunk immediately — no gap
+        recognitionRequest = nil
+        oldTask?.cancel()
+        startChunk()
     }
 
     // MARK: - Results
-
-    /// Lines committed from previous chunks (immutable once chunk ends).
-    private var committedLines: [TranscriptLine] = []
-    /// Lines from the current in-progress chunk (replaced on each partial result).
-    private var currentChunkLines: [TranscriptLine] = []
 
     private func handleChunkResult(
         _ result: SFSpeechRecognitionResult?,
@@ -198,7 +232,6 @@ final class TranscriptionService: ObservableObject {
         chunkOffset: TimeInterval
     ) {
         if let result {
-            // Replace current chunk lines with latest partial/final result
             currentChunkLines = result.bestTranscription.segments.map { segment in
                 TranscriptLine(
                     timestamp: chunkOffset + segment.timestamp,
@@ -206,7 +239,6 @@ final class TranscriptionService: ObservableObject {
                 )
             }
 
-            // Merge committed + current for display
             lines = committedLines + currentChunkLines
             fullText = lines.map(\.text).joined(separator: " ")
 
@@ -224,12 +256,22 @@ final class TranscriptionService: ObservableObject {
     // MARK: - Buffer Management
 
     private func flushSampleBuffer() {
-        guard !sampleBuffer.isEmpty, let request = recognitionRequest, let format = audioFormat else {
-            return
-        }
+        guard !sampleBuffer.isEmpty else { return }
 
         let samples = sampleBuffer
         sampleBuffer = []
+
+        // Feed to the active request (current or pending)
+        if let request = recognitionRequest {
+            feedSamples(samples, to: request)
+            currentChunkSampleCount += samples.count
+        } else if let request = pendingRequest {
+            feedSamples(samples, to: request)
+        }
+    }
+
+    private func feedSamples(_ samples: [Int16], to request: SFSpeechAudioBufferRecognitionRequest) {
+        guard let format = audioFormat else { return }
 
         let frameCount = AVAudioFrameCount(samples.count)
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
@@ -255,23 +297,31 @@ final class TranscriptionService: ObservableObject {
     }
 
     private func completeIfNeeded() {
+        lines = committedLines + currentChunkLines
+        fullText = lines.map(\.text).joined(separator: " ")
+
         let result = snapshot()
         let continuation = finishContinuation
         finishContinuation = nil
         finishTimeoutTask?.cancel()
         finishTimeoutTask = nil
+
+        teardown()
+        continuation?.resume(returning: result)
+    }
+
+    private func teardown() {
         chunkTimer?.invalidate()
         chunkTimer = nil
-
         recognitionRequest = nil
         recognitionTask?.cancel()
         recognitionTask = nil
+        pendingRequest = nil
         recognizer = nil
         audioFormat = nil
         isTranscribing = false
         sampleBuffer = []
-
-        continuation?.resume(returning: result)
+        overlapBuffer = []
     }
 
     private func snapshot() -> Snapshot {
