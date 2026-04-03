@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 import Combine
 
 /// Orchestrates the full pipeline: BLE audio -> decode -> transcribe -> format -> push.
@@ -38,8 +39,10 @@ final class SessionManager: ObservableObject {
 
     private var opusDecoder: OpusStreamDecoder?
     private var audioSubscription: AnyCancellable?
+    private var bleStateSubscription: AnyCancellable?
     private var elapsedTimer: Timer?
     private var calendarCheckTimer: Timer?
+    private var disconnectGraceTimer: Timer?
     private var recordingStart: Date?
     private var currentMeeting: CalendarService.Meeting?
 
@@ -98,8 +101,10 @@ final class SessionManager: ObservableObject {
         currentMeeting = meeting
         currentTitle = meeting?.title ?? ""
 
+        // Activate audio session for background recording
+        activateAudioSession()
+
         opusDecoder = OpusStreamDecoder()
-        DebugLog.write("startRecording: opusDecoder=\(opusDecoder != nil)")
         if opusDecoder == nil {
             lastError = "Opus decoder init failed — audio won't transcribe"
         }
@@ -110,6 +115,9 @@ final class SessionManager: ObservableObject {
             .sink { [weak self] frame in
                 self?.processOpusFrame(frame)
             }
+
+        // Monitor BLE disconnection during recording
+        startBLEMonitoring()
 
         elapsedTimer = Timer.scheduledTimer(
             withTimeInterval: 1,
@@ -261,5 +269,104 @@ final class SessionManager: ObservableObject {
         recordingDuration = 0
         recordingStart = nil
         currentMeeting = nil
+        bleStateSubscription = nil
+        disconnectGraceTimer?.invalidate()
+        disconnectGraceTimer = nil
+        deactivateAudioSession()
+    }
+
+    // MARK: - Background Audio Session
+
+    private func activateAudioSession() {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playAndRecord, mode: .default, options: [.allowBluetooth, .mixWithOthers])
+            try session.setActive(true)
+        } catch {
+            DebugLog.write("AVAudioSession activate failed: \(error)")
+        }
+    }
+
+    private func deactivateAudioSession() {
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    // MARK: - BLE Disconnect Handling
+
+    private func startBLEMonitoring() {
+        bleStateSubscription = ble.$connectionState
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] newState in
+                guard let self, self.state == .recording else { return }
+
+                if newState == .disconnected {
+                    // Start grace period — pendant may reconnect
+                    self.disconnectGraceTimer?.invalidate()
+                    self.disconnectGraceTimer = Timer.scheduledTimer(
+                        withTimeInterval: 10,
+                        repeats: false
+                    ) { [weak self] _ in
+                        Task { @MainActor [weak self] in
+                            guard let self, self.state == .recording else { return }
+                            self.lastError = "Pendant disconnected — recording stopped"
+                            self.stopRecording()
+                        }
+                    }
+                } else if newState == .connected {
+                    // Reconnected within grace period
+                    self.disconnectGraceTimer?.invalidate()
+                    self.disconnectGraceTimer = nil
+                    self.opusDecoder?.reset()
+                }
+            }
+    }
+
+    // MARK: - Load Transcripts from Disk
+
+    func loadRecentTranscripts() {
+        let fm = FileManager.default
+        guard let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let transcriptsDir = docs.appendingPathComponent("Transcripts", isDirectory: true)
+
+        guard let files = try? fm.contentsOfDirectory(at: transcriptsDir, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
+
+        let mdFiles = files
+            .filter { $0.pathExtension == "md" }
+            .sorted { a, b in
+                let dateA = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let dateB = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return dateA > dateB
+            }
+            .prefix(50)
+
+        var loaded: [RecentTranscript] = []
+        for file in mdFiles {
+            guard let content = try? String(contentsOf: file, encoding: .utf8) else { continue }
+            let title = parseYAMLField("title", from: content) ?? file.deletingPathExtension().lastPathComponent
+            let dateStr = parseYAMLField("recording_started_at", from: content)
+            let date = dateStr.flatMap { ISO8601DateFormatter().date(from: $0) } ?? (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date()
+            let hasContent = !content.contains("(No transcript)")
+
+            loaded.append(RecentTranscript(
+                title: title,
+                date: date,
+                pushed: false, // TODO: track in index file
+                fileURL: file
+            ))
+            _ = hasContent // suppress unused warning
+        }
+
+        recentTranscripts = loaded
+    }
+
+    private func parseYAMLField(_ key: String, from content: String) -> String? {
+        // Match: key: "value" or key: value
+        let pattern = "^\(key):\\s*\"?([^\"\\n]+)\"?"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .anchorsMatchLines),
+              let match = regex.firstMatch(in: content, range: NSRange(content.startIndex..., in: content)),
+              let range = Range(match.range(at: 1), in: content) else {
+            return nil
+        }
+        return String(content[range])
     }
 }

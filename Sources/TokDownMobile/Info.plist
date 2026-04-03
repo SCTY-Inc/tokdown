@@ -32,11 +32,14 @@
 	<true/>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>TokDown transcribes pendant audio into markdown transcripts on device.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>TokDown uses the audio session to keep transcription active in the background.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>
+		<string>audio</string>
 	</array>
 </dict>
 </plist>

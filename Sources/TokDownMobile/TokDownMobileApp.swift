@@ -50,5 +50,6 @@ final class AppState: ObservableObject {
 
         session.lastError = errors.isEmpty ? nil : errors.joined(separator: " • ")
         session.applySettings()
+        session.loadRecentTranscripts()
     }
 }
