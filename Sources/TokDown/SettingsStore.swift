@@ -1,8 +1,9 @@
 import Foundation
 
 @MainActor
-final class SettingsStore: ObservableObject {
-    @Published var settings: AppSettings
+@Observable
+final class SettingsStore {
+    var settings: AppSettings
 
     private let defaults = UserDefaults.standard
     private let settingsKey = "TokDown.Settings.V2"

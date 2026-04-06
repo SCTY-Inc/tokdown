@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import ScreenCaptureKit
 import AVFoundation
 
@@ -69,7 +70,7 @@ final class SystemAudioService: NSObject {
 private final class AudioOutputHandler: NSObject, SCStreamOutput {
     nonisolated(unsafe) private let writer: AVAssetWriter
     nonisolated(unsafe) private let input: AVAssetWriterInput
-    nonisolated(unsafe) private var sessionStarted = false
+    private let sessionStarted = Mutex(false)
 
     init(writer: AVAssetWriter, input: AVAssetWriterInput) {
         self.writer = writer
@@ -79,9 +80,11 @@ private final class AudioOutputHandler: NSObject, SCStreamOutput {
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .audio, sampleBuffer.isValid else { return }
 
-        if !sessionStarted {
-            writer.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
-            sessionStarted = true
+        sessionStarted.withLock { started in
+            if !started {
+                writer.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
+                started = true
+            }
         }
 
         if input.isReadyForMoreMediaData {

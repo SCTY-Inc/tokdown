@@ -1,6 +1,6 @@
 import Foundation
 
-struct TranscriptDocument {
+struct TranscriptDocument: Sendable {
     let title: String
     let markdown: String
 }

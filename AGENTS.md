@@ -23,8 +23,10 @@ Core product constraints:
 ├── CLAUDE.md
 ├── scripts/
 │   └── build-app.sh
+├── icon.png
 ├── Tests/
 │   └── TokDownTests/
+│       ├── CalendarServiceTests.swift
 │       └── TranscriptFormatterTests.swift
 └── Sources/
     └── TokDown/
@@ -43,7 +45,10 @@ Core product constraints:
         └── Resources/
             ├── Info.plist
             ├── TokDown.entitlements
-            └── TokDownIcon.svg
+            ├── TokDownIcon.svg
+            ├── TokDownMenuIdle.svg
+            ├── TokDownMenuRecording.svg
+            └── TokDownMenuTranscribing.svg
 ```
 
 ## Important files
@@ -85,7 +90,7 @@ Artifacts:
 
 ## Build, test, and lint commands
 
-There is no lint setup yet, but there is a small XCTest suite covering transcript formatting.
+There is no lint setup yet, but there is a small XCTest suite covering transcript formatting and calendar service logic.
 
 Use these checks before submitting changes:
 
@@ -142,8 +147,10 @@ Do not:
 ## Platform and implementation notes
 
 - Target platform: `macOS 26+`
+- Uses `@Observable` (Observation framework) — not `ObservableObject`/`@Published`. Views use `@State`/`@Environment`, not `@StateObject`/`@EnvironmentObject`.
 - The app uses Apple’s newer on-device SpeechTranscriber pipeline.
 - ScreenCaptureKit still requires a minimal video config even for audio-only capture.
+- Audio capture uses `Mutex` (Synchronization framework) for thread-safe session tracking.
 - Menu bar UI uses `MenuBarExtra` with `.menu` style, so layout behavior is constrained.
 - Permission prompts and TCC behavior depend on code signing; the build script signs the app automatically.
 

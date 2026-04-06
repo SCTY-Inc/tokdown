@@ -2,8 +2,8 @@ import SwiftUI
 import AppKit
 
 struct MenuBarContentView: View {
-    @EnvironmentObject private var coordinator: MenuBarCoordinator
-    @EnvironmentObject private var settingsStore: SettingsStore
+    @Environment(MenuBarCoordinator.self) private var coordinator
+    @Environment(SettingsStore.self) private var settingsStore
 
     var body: some View {
         Group {
@@ -73,7 +73,7 @@ struct MenuBarContentView: View {
 }
 
 struct SettingsWindowView: View {
-    @ObservedObject var settingsStore: SettingsStore
+    var settingsStore: SettingsStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {

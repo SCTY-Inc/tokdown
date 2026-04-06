@@ -15,9 +15,7 @@ final class CalendarService: NSObject {
         case .notDetermined:
             return await withCheckedContinuation { continuation in
                 store.requestFullAccessToEvents { granted, _ in
-                    Task { @MainActor in
-                        continuation.resume(returning: granted)
-                    }
+                    continuation.resume(returning: granted)
                 }
             }
         default:

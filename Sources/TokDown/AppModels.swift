@@ -27,7 +27,7 @@ enum AudioSource: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-struct AppSettings: Codable {
+struct AppSettings: Codable, Sendable {
     var saveFolderPath: String
     var audioSource: AudioSource
 
@@ -131,7 +131,7 @@ struct UpcomingMeeting: Identifiable, Hashable {
     }
 }
 
-struct TranscriptLine {
+struct TranscriptLine: Sendable {
     let timestamp: TimeInterval
     let text: String
 }

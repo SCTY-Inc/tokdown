@@ -12,9 +12,7 @@ final class RecordingService {
 
         return await withCheckedContinuation { continuation in
             AVCaptureDevice.requestAccess(for: .audio) { granted in
-                Task { @MainActor in
-                    continuation.resume(returning: granted)
-                }
+                continuation.resume(returning: granted)
             }
         }
     }

@@ -1,7 +1,7 @@
 import Foundation
 import AppKit
 
-struct SessionArtifacts {
+struct SessionArtifacts: Sendable {
     let audioURL: URL
     let transcriptURL: URL
 }
@@ -27,7 +27,7 @@ final class StorageService {
     }
 
     func deleteFile(_ url: URL) {
-        try? FileManager.default.removeItem(at: url)
+        try? FileManager.default.trashItem(at: url, resultingItemURL: nil)
     }
 
     func openFolder(_ url: URL) {

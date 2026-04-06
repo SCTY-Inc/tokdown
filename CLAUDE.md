@@ -15,6 +15,7 @@ bash scripts/build-app.sh debug && open TokDown.app
 
 ## Gotchas
 - Swift 6 concurrency: no `Task { @MainActor in }` inside completion handlers
+- Uses `@Observable` — not `ObservableObject`. Don't introduce `@Published`, `@StateObject`, or `@EnvironmentObject`.
 - ScreenCaptureKit needs video config even for audio-only (2x2 @ 1fps)
 - Core Audio Taps migration blocked by libdispatch main-thread assertion crash on macOS 26 — tried AVAssetWriter, AVAudioFile, ExtAudioFile, all crash identically. Needs Xcode thread sanitizer debugging. Track via AudioCap (insidegui/AudioCap) patterns.
 - Code signing required for TCC permissions

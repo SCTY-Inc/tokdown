@@ -2,12 +2,13 @@ import Foundation
 import AppKit
 
 @MainActor
-final class MenuBarCoordinator: ObservableObject {
-    @Published private(set) var state: RecordingState = .idle
-    @Published private(set) var elapsedSeconds: Int = 0
-    @Published private(set) var activeTitle: String?
-    @Published private(set) var upcomingMeetings: [UpcomingMeeting] = []
-    @Published var statusMessage: String?
+@Observable
+final class MenuBarCoordinator {
+    private(set) var state: RecordingState = .idle
+    private(set) var elapsedSeconds: Int = 0
+    private(set) var activeTitle: String?
+    private(set) var upcomingMeetings: [UpcomingMeeting] = []
+    var statusMessage: String?
 
     let settingsStore: SettingsStore
 
@@ -21,7 +22,7 @@ final class MenuBarCoordinator: ObservableObject {
     private var startTime: Date?
     private var currentMeeting: UpcomingMeeting?
     private var currentArtifacts: SessionArtifacts?
-    private var elapsedTimer: Timer?
+    private var timerTask: Task<Void, Never>?
 
     var menuTitle: String {
         state == .recording ? formattedElapsed : ""
@@ -29,10 +30,6 @@ final class MenuBarCoordinator: ObservableObject {
 
     init(settingsStore: SettingsStore) {
         self.settingsStore = settingsStore
-    }
-
-    deinit {
-        MainActor.assumeIsolated { elapsedTimer?.invalidate() }
     }
 
     // MARK: - Meetings
@@ -172,18 +169,19 @@ final class MenuBarCoordinator: ObservableObject {
     // MARK: - Timer
 
     private func startElapsedTimer() {
-        elapsedTimer?.invalidate()
-        elapsedTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self, let start = self.startTime, self.state == .recording else { return }
-                self.elapsedSeconds = Int(Date().timeIntervalSince(start))
+        timerTask?.cancel()
+        timerTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard let start = startTime, state == .recording else { break }
+                elapsedSeconds = Int(Date().timeIntervalSince(start))
             }
         }
     }
 
     private func stopElapsedTimer() {
-        elapsedTimer?.invalidate()
-        elapsedTimer = nil
+        timerTask?.cancel()
+        timerTask = nil
         elapsedSeconds = 0
     }
 
