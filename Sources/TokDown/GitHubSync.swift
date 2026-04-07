@@ -3,21 +3,27 @@ import Security
 
 /// Pushes markdown transcripts to GitHub via the Contents API.
 ///
-/// Target: PUT https://api.github.com/repos/amadad/agents/contents/intel/transcripts/{filename}
-/// Auth:   Bearer {PAT} from Keychain (service: "tokdown")
+/// Auth: Bearer {PAT} from Keychain (service: "tokdown")
 actor GitHubSync {
 
     enum SyncError: Error, Sendable {
         case missingPAT
+        case missingRepo
         case encodingFailed
         case httpError(statusCode: Int, message: String)
         case networkError(Error)
     }
 
-    private let repo = "amadad/agents"
-    private let basePath = "intel/transcripts"
+    var repo: String = ""
+    var basePath: String = "intel/transcripts"
     private static let keychainService = "tokdown"
     private static let keychainAccount = "github-pat"
+
+    /// Configure the target repo and path.
+    func configure(repo: String, basePath: String) {
+        self.repo = repo
+        self.basePath = basePath
+    }
 
     /// Push a transcript markdown file to GitHub.
     /// - Parameters:
@@ -25,6 +31,9 @@ actor GitHubSync {
     ///   - content: Full markdown string
     ///   - commitMessage: e.g. "transcript: Standup"
     func push(filename: String, content: String, commitMessage: String) async throws {
+        guard !repo.isEmpty else {
+            throw SyncError.missingRepo
+        }
         guard let pat = loadPAT() else {
             throw SyncError.missingPAT
         }

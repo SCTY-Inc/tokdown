@@ -19,7 +19,7 @@ final class PushQueue {
     private(set) var pendingCount = 0
 
     private var queue: [PendingPush] = []
-    private let github = GitHubSync()
+    let github = GitHubSync()
     private let monitor = NWPathMonitor()
     private var isDraining = false
 

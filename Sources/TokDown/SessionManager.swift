@@ -241,6 +241,9 @@ final class SessionManager {
         startTime: Date,
         fileURL: URL? = nil
     ) {
+        Task {
+            await pushQueue.github.configure(repo: settings.transcriptRepo, basePath: settings.transcriptRepoPath)
+        }
         pushQueue.enqueue(
             filename: doc.filename,
             content: doc.markdown,

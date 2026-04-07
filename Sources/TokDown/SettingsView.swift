@@ -30,14 +30,13 @@ struct SettingsView: View {
                 }
                 .disabled(patInput.isEmpty)
 
-                LabeledContent("Target") {
-                    Text("amadad/agents")
-                        .foregroundStyle(.secondary)
-                }
-                LabeledContent("Path") {
-                    Text(session.settings.transcriptRepoPath)
-                        .foregroundStyle(.secondary)
-                }
+                TextField("Repository (owner/name)", text: $session.settings.transcriptRepo)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+
+                TextField("Path", text: $session.settings.transcriptRepoPath)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
 
                 Toggle("Auto-push after recording", isOn: $session.settings.autoPushEnabled)
 
@@ -101,7 +100,7 @@ struct SettingsView: View {
 
             Section("About") {
                 LabeledContent("App") {
-                    Text("TokDown Mobile")
+                    Text("TokDown")
                 }
                 LabeledContent("Version") {
                     Text(appVersion)

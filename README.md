@@ -56,4 +56,4 @@ Add your GitHub PAT in the app's Settings screen. Transcripts push to the config
 
 ## License
 
-Private. SCTY-Inc/tokdown-mobile.
+MIT

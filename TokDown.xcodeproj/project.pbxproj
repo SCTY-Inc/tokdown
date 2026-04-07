@@ -130,7 +130,7 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					669A733139B734037ADF5BC4 = {
-						DevelopmentTeam = 683DJ66L4U;
+						DevelopmentTeam = "${DEVELOPMENT_TEAM}";
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -319,7 +319,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 683DJ66L4U;
+				DEVELOPMENT_TEAM = "${DEVELOPMENT_TEAM}";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Sources/TokDown/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
@@ -344,7 +344,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 683DJ66L4U;
+				DEVELOPMENT_TEAM = "${DEVELOPMENT_TEAM}";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Sources/TokDown/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;

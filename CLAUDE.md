@@ -2,8 +2,7 @@
 
 iOS companion to TokDown (macOS). Connects to Limitless Pendant via BLE -> on-device speech recognition -> markdown -> GitHub push.
 
-Repo: SCTY-Inc/tokdown-mobile
-Sibling: amadad/tokdown (macOS menu bar app)
+Sibling: [TokDown for macOS](https://github.com/amadad/tokdown)
 
 ## Build & Run
 ```bash
@@ -40,7 +39,7 @@ Key files:
 - Pendant advertises as "Pendant" (not "Friend" or "Omi")
 
 ## Output
-Markdown transcripts pushed to `amadad/agents` repo at `intel/transcripts/YYYY-MM-DD_HH-mm_Title.md`.
+Markdown transcripts pushed to a configurable GitHub repo (set in Settings) at `{path}/YYYY-MM-DD_HH-mm_Title.md`.
 YAML front matter with `audio_source: "limitless_pendant"`, `source: "pendant_ambient"` or `"pendant_meeting"`.
 Same format as TokDown macOS -- transcripts are indistinguishable in the archive.
 

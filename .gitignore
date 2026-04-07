@@ -24,3 +24,10 @@ Package.resolved
 # Secrets
 .env
 *.pem
+*.p12
+*.key
+Secrets/
+credentials
+
+# Project-local MCP config
+.mcp.json

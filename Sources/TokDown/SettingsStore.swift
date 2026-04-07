@@ -22,8 +22,15 @@ final class SettingsStore {
         didSet { defaults.set(autoPushEnabled, forKey: "autoPushEnabled") }
     }
 
-    /// Target repo path for transcripts
-    let transcriptRepoPath = "intel/transcripts"
+    /// Target GitHub repo (owner/name)
+    var transcriptRepo: String {
+        didSet { defaults.set(transcriptRepo, forKey: "transcriptRepo") }
+    }
+
+    /// Path within the repo for transcripts
+    var transcriptRepoPath: String {
+        didSet { defaults.set(transcriptRepoPath, forKey: "transcriptRepoPath") }
+    }
 
     /// Vocabulary hints for speech recognition (names, jargon, products)
     var vocabularyHints: [String] {
@@ -35,6 +42,8 @@ final class SettingsStore {
     init() {
         self.hasGitHubPAT = defaults.bool(forKey: "hasGitHubPAT")
         self.autoPushEnabled = defaults.bool(forKey: "autoPushEnabled")
+        self.transcriptRepo = defaults.string(forKey: "transcriptRepo") ?? ""
+        self.transcriptRepoPath = defaults.string(forKey: "transcriptRepoPath") ?? "intel/transcripts"
         self.vocabularyHints = defaults.stringArray(forKey: "vocabularyHints") ?? []
 
         let modeRaw = defaults.string(forKey: "recordingMode") ?? "manual"

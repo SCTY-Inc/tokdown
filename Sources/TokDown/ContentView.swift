@@ -287,6 +287,7 @@ struct ContentView: View {
 
 struct TranscriptDetailView: View {
     let transcript: SessionManager.RecentTranscript
+    @Environment(SessionManager.self) var session
     @State private var content: String = ""
     @State private var isEditing = false
     @State private var saveStatus: String?
@@ -367,6 +368,7 @@ struct TranscriptDetailView: View {
         guard let url = transcript.fileURL else { return }
         let filename = url.lastPathComponent
         Task {
+            await github.configure(repo: session.settings.transcriptRepo, basePath: session.settings.transcriptRepoPath)
             do {
                 try await github.push(
                     filename: filename,
