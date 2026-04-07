@@ -46,7 +46,7 @@ private struct MenuBarLabelView: View {
 
 @main
 struct TokDownApp: App {
-    @State private var settingsStore = SettingsStore()
+    @State private var settingsStore: SettingsStore
     @State private var coordinator: MenuBarCoordinator
 
     init() {

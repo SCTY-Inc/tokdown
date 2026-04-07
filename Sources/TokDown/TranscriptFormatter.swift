@@ -28,21 +28,16 @@ struct TranscriptFormatter {
             fullText: fullText
         )
         let body = makeBody(fullText: fullText, lines: lines)
-        let markdown = """
-        \(makeFrontMatter(
+        let frontMatter = makeFrontMatter(
             title: title,
             startTime: startTime,
             endTime: endTime,
             audioSource: audioSource,
             meeting: meeting
-        ))
-
-        # \(title)
-
-        \(headingDateRange(startTime: startTime, endTime: endTime))
-
-        \(body)
-        """.replacingOccurrences(of: "        ", with: "")
+        )
+        let dateRange = headingDateRange(startTime: startTime, endTime: endTime)
+        let markdown = [frontMatter, "", "# \(title)", "", dateRange, "", body]
+            .joined(separator: "\n")
 
         return TranscriptDocument(title: title, markdown: markdown)
     }

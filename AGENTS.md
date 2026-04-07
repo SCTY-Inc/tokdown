@@ -150,7 +150,7 @@ Do not:
 - Uses `@Observable` (Observation framework) — not `ObservableObject`/`@Published`. Views use `@State`/`@Environment`, not `@StateObject`/`@EnvironmentObject`.
 - The app uses Apple’s newer on-device SpeechTranscriber pipeline.
 - ScreenCaptureKit still requires a minimal video config even for audio-only capture.
-- Audio capture uses `Mutex` (Synchronization framework) for thread-safe session tracking.
+- Audio capture uses `Mutex` (Synchronization framework) for session tracking and a serial `DispatchQueue` to serialize writer access across the capture callback and `finish()`.
 - Menu bar UI uses `MenuBarExtra` with `.menu` style, so layout behavior is constrained.
 - Permission prompts and TCC behavior depend on code signing; the build script signs the app automatically.
 

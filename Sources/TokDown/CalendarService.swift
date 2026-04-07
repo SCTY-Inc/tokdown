@@ -41,26 +41,6 @@ final class CalendarService: NSObject {
         )
     }
 
-    func meetingAtCurrentTime() async -> UpcomingMeeting? {
-        guard await requestAccess() else { return nil }
-
-        let now = Date()
-        let start = now.addingTimeInterval(-900)
-        let end = now.addingTimeInterval(900)
-        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
-        let events = store.events(matching: predicate)
-
-        let active = events.first {
-            !$0.isAllDay && $0.startDate <= now && $0.endDate >= now
-        }
-
-        if let active = active {
-            return UpcomingMeeting(event: active)
-        }
-
-        return nil
-    }
-
     nonisolated static func selectUpcomingMeetings(
         from meetings: [UpcomingMeeting],
         now: Date,

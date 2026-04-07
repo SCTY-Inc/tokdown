@@ -21,7 +21,7 @@ final class TranscriptionService {
         }
     }
 
-    func transcribe(audioURL: URL) async throws -> (String, [TranscriptLine]) {
+    func transcribe(audioURL: URL) async throws -> (fullText: String, lines: [TranscriptLine]) {
         try await ensureModelAvailable()
 
         let transcriber = SpeechTranscriber(

@@ -112,8 +112,8 @@ final class MenuBarCoordinator {
 
         do {
             let result = try await transcriptionService.transcribe(audioURL: audioURL)
-            fullText = result.0
-            lines = result.1
+            fullText = result.fullText
+            lines = result.lines
             transcriptionSucceeded = true
         } catch {
             statusMessage = "Transcription: \(error.localizedDescription)"

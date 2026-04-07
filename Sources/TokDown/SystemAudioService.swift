@@ -70,6 +70,7 @@ final class SystemAudioService: NSObject {
 private final class AudioOutputHandler: NSObject, SCStreamOutput {
     nonisolated(unsafe) private let writer: AVAssetWriter
     nonisolated(unsafe) private let input: AVAssetWriterInput
+    private let queue = DispatchQueue(label: "audio.writer")
     private let sessionStarted = Mutex(false)
 
     init(writer: AVAssetWriter, input: AVAssetWriterInput) {
@@ -80,19 +81,23 @@ private final class AudioOutputHandler: NSObject, SCStreamOutput {
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .audio, sampleBuffer.isValid else { return }
 
-        sessionStarted.withLock { started in
-            if !started {
-                writer.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
-                started = true
+        queue.sync {
+            sessionStarted.withLock { started in
+                if !started {
+                    writer.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
+                    started = true
+                }
             }
-        }
 
-        if input.isReadyForMoreMediaData {
-            input.append(sampleBuffer)
+            if input.isReadyForMoreMediaData {
+                input.append(sampleBuffer)
+            }
         }
     }
 
     @MainActor func finish() async {
+        // Drain the writer queue to ensure no in-flight appends
+        queue.sync {}
         input.markAsFinished()
         await writer.finishWriting()
     }
