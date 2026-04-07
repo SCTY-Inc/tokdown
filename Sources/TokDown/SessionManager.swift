@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
-import Combine
+import UIKit
+import Observation
 
 /// Orchestrates the full pipeline: BLE audio -> decode -> transcribe -> format -> push.
 ///
@@ -8,8 +9,8 @@ import Combine
 /// Modes:
 ///   - Manual: user taps start/stop
 ///   - Calendar: auto-start when meeting begins, auto-stop when meeting ends
-@MainActor
-final class SessionManager: ObservableObject {
+@MainActor @Observable
+final class SessionManager {
 
     enum State: Equatable, Sendable {
         case idle
@@ -23,12 +24,12 @@ final class SessionManager: ObservableObject {
         case calendar
     }
 
-    @Published var state: State = .idle
-    @Published var recordingMode: RecordingMode = .manual
-    @Published var currentTitle: String = ""
-    @Published var recordingDuration: TimeInterval = 0
-    @Published var lastError: String?
-    @Published var recentTranscripts: [RecentTranscript] = []
+    var state: State = .idle
+    var recordingMode: RecordingMode = .manual
+    var currentTitle: String = ""
+    var recordingDuration: TimeInterval = 0
+    var lastError: String?
+    var recentTranscripts: [RecentTranscript] = []
 
     let ble: PendantBLE
     let transcription: TranscriptionService
@@ -38,8 +39,7 @@ final class SessionManager: ObservableObject {
     var settings: SettingsStore
 
     private var opusDecoder: OpusStreamDecoder?
-    private var audioSubscription: AnyCancellable?
-    private var bleStateSubscription: AnyCancellable?
+    private var audioTask: Task<Void, Never>?
     private var elapsedTimer: Timer?
     private var calendarCheckTimer: Timer?
     private var disconnectGraceTimer: Timer?
@@ -77,9 +77,6 @@ final class SessionManager: ObservableObject {
 
     func setRecordingMode(_ mode: RecordingMode) {
         recordingMode = mode
-        if settings.recordingMode != mode {
-            settings.recordingMode = mode
-        }
 
         switch mode {
         case .manual:
@@ -101,7 +98,6 @@ final class SessionManager: ObservableObject {
         currentMeeting = meeting
         currentTitle = meeting?.title ?? ""
 
-        // Activate audio session for background recording
         activateAudioSession()
 
         opusDecoder = OpusStreamDecoder()
@@ -109,17 +105,20 @@ final class SessionManager: ObservableObject {
             lastError = "Opus decoder init failed — audio won't transcribe"
         }
 
-        // Feed vocabulary hints to speech recognizer
         transcription.contextualStrings = settings.vocabularyHints
         transcription.startTranscription()
 
-        audioSubscription = ble.opusFrames
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] frame in
+        if let error = transcription.lastError {
+            lastError = error
+        }
+
+        let stream = ble.startOpusStream()
+        audioTask = Task { @MainActor [weak self] in
+            for await frame in stream {
                 self?.processOpusFrame(frame)
             }
+        }
 
-        // Monitor BLE disconnection during recording
         startBLEMonitoring()
 
         elapsedTimer = Timer.scheduledTimer(
@@ -136,8 +135,9 @@ final class SessionManager: ObservableObject {
     func stopRecording() {
         guard state == .recording else { return }
 
-        audioSubscription?.cancel()
-        audioSubscription = nil
+        audioTask?.cancel()
+        audioTask = nil
+        ble.stopOpusStream()
         elapsedTimer?.invalidate()
         elapsedTimer = nil
 
@@ -148,10 +148,17 @@ final class SessionManager: ObservableObject {
 
         state = .transcribing
 
+        let bgTaskID = UIApplication.shared.beginBackgroundTask(expirationHandler: nil)
+
         Task { @MainActor in
+            defer {
+                if bgTaskID != .invalid {
+                    UIApplication.shared.endBackgroundTask(bgTaskID)
+                }
+            }
+
             let snapshot = await transcription.finishTranscription()
 
-            // Auto-title from transcript content if no title set
             var resolvedTitle = title
             if resolvedTitle.isEmpty, !snapshot.fullText.isEmpty {
                 resolvedTitle = autoTitle(from: snapshot.fullText)
@@ -274,7 +281,7 @@ final class SessionManager: ObservableObject {
         recordingDuration = 0
         recordingStart = nil
         currentMeeting = nil
-        bleStateSubscription = nil
+        ble.onConnectionStateChanged = nil
         disconnectGraceTimer?.invalidate()
         disconnectGraceTimer = nil
         deactivateAudioSession()
@@ -296,7 +303,7 @@ final class SessionManager: ObservableObject {
     private func activateAudioSession() {
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, mode: .default, options: [.allowBluetooth, .mixWithOthers])
+            try session.setCategory(.playAndRecord, mode: .default, options: [.allowBluetoothHFP, .mixWithOthers])
             try session.setActive(true)
         } catch {
             DebugLog.write("AVAudioSession activate failed: \(error)")
@@ -310,31 +317,30 @@ final class SessionManager: ObservableObject {
     // MARK: - BLE Disconnect Handling
 
     private func startBLEMonitoring() {
-        bleStateSubscription = ble.$connectionState
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] newState in
-                guard let self, self.state == .recording else { return }
+        ble.onConnectionStateChanged = { [weak self] newState in
+            guard let self, self.state == .recording else { return }
 
-                if newState == .disconnected {
-                    // Start grace period — pendant may reconnect
-                    self.disconnectGraceTimer?.invalidate()
-                    self.disconnectGraceTimer = Timer.scheduledTimer(
-                        withTimeInterval: 10,
-                        repeats: false
-                    ) { [weak self] _ in
-                        Task { @MainActor [weak self] in
-                            guard let self, self.state == .recording else { return }
-                            self.lastError = "Pendant disconnected — recording stopped"
-                            self.stopRecording()
-                        }
+            if newState == .disconnected {
+                self.disconnectGraceTimer?.invalidate()
+                self.disconnectGraceTimer = Timer.scheduledTimer(
+                    withTimeInterval: 10,
+                    repeats: false
+                ) { [weak self] _ in
+                    Task { @MainActor [weak self] in
+                        guard let self, self.state == .recording else { return }
+                        self.lastError = "Pendant disconnected — recording stopped"
+                        self.stopRecording()
                     }
-                } else if newState == .connected {
-                    // Reconnected within grace period
-                    self.disconnectGraceTimer?.invalidate()
-                    self.disconnectGraceTimer = nil
-                    self.opusDecoder?.reset()
                 }
+            } else if newState == .connected {
+                self.disconnectGraceTimer?.invalidate()
+                self.disconnectGraceTimer = nil
+                self.opusDecoder?.reset()
+                // Re-enable audio stream after reconnect — completeHandshake
+                // will call enableStreaming() once timeSync finishes since
+                // opusFrameContinuation is still active from startOpusStream().
             }
+        }
     }
 
     // MARK: - Load Transcripts from Disk
@@ -361,22 +367,19 @@ final class SessionManager: ObservableObject {
             let title = parseYAMLField("title", from: content) ?? file.deletingPathExtension().lastPathComponent
             let dateStr = parseYAMLField("recording_started_at", from: content)
             let date = dateStr.flatMap { ISO8601DateFormatter().date(from: $0) } ?? (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date()
-            let hasContent = !content.contains("(No transcript)")
 
             loaded.append(RecentTranscript(
                 title: title,
                 date: date,
-                pushed: false, // TODO: track in index file
+                pushed: false,
                 fileURL: file
             ))
-            _ = hasContent // suppress unused warning
         }
 
         recentTranscripts = loaded
     }
 
     private func parseYAMLField(_ key: String, from content: String) -> String? {
-        // Match: key: "value" or key: value
         let pattern = "^\(key):\\s*\"?([^\"\\n]+)\"?"
         guard let regex = try? NSRegularExpression(pattern: pattern, options: .anchorsMatchLines),
               let match = regex.firstMatch(in: content, range: NSRange(content.startIndex..., in: content)),

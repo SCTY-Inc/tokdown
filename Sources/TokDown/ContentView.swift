@@ -3,10 +3,10 @@ import SwiftUI
 /// Main screen: pendant status, recording controls, upcoming meetings, recent transcripts.
 struct ContentView: View {
 
-    @EnvironmentObject var session: SessionManager
-    @EnvironmentObject var ble: PendantBLE
-    @EnvironmentObject var transcription: TranscriptionService
-    @EnvironmentObject var calendar: CalendarService
+    @Environment(SessionManager.self) var session
+    @Environment(PendantBLE.self) var ble
+    @Environment(TranscriptionService.self) var transcription
+    @Environment(CalendarService.self) var calendar
 
     var body: some View {
         NavigationStack {
@@ -279,9 +279,7 @@ struct ContentView: View {
     // MARK: - Helpers
 
     private func meetingTime(_ date: Date) -> String {
-        let fmt = DateFormatter()
-        fmt.dateFormat = "h:mm a"
-        return fmt.string(from: date)
+        date.formatted(date: .omitted, time: .shortened)
     }
 }
 

@@ -4,7 +4,7 @@ import Security
 /// Pushes markdown transcripts to GitHub via the Contents API.
 ///
 /// Target: PUT https://api.github.com/repos/amadad/agents/contents/intel/transcripts/{filename}
-/// Auth:   Bearer {PAT} from Keychain (service: "tokdown-mobile")
+/// Auth:   Bearer {PAT} from Keychain (service: "tokdown")
 actor GitHubSync {
 
     enum SyncError: Error, Sendable {
@@ -16,7 +16,7 @@ actor GitHubSync {
 
     private let repo = "amadad/agents"
     private let basePath = "intel/transcripts"
-    private static let keychainService = "tokdown-mobile"
+    private static let keychainService = "tokdown"
     private static let keychainAccount = "github-pat"
 
     /// Push a transcript markdown file to GitHub.
@@ -124,6 +124,7 @@ actor GitHubSync {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: Self.keychainService,
             kSecAttrAccount as String: Self.keychainAccount,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
@@ -153,12 +154,22 @@ actor GitHubSync {
         let existing = SecItemCopyMatching(query as CFDictionary, nil)
 
         if existing == errSecSuccess {
-            let update: [String: Any] = [kSecValueData as String: tokenData]
-            SecItemUpdate(query as CFDictionary, update as CFDictionary)
+            let update: [String: Any] = [
+                kSecValueData as String: tokenData,
+                kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            ]
+            let status = SecItemUpdate(query as CFDictionary, update as CFDictionary)
+            if status != errSecSuccess {
+                throw SyncError.httpError(statusCode: Int(status), message: "Keychain update failed: \(status)")
+            }
         } else {
             var addQuery = query
             addQuery[kSecValueData as String] = tokenData
-            SecItemAdd(addQuery as CFDictionary, nil)
+            addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            let status = SecItemAdd(addQuery as CFDictionary, nil)
+            if status != errSecSuccess {
+                throw SyncError.httpError(statusCode: Int(status), message: "Keychain add failed: \(status)")
+            }
         }
     }
 
@@ -169,6 +180,6 @@ actor GitHubSync {
             kSecAttrService as String: Self.keychainService,
             kSecAttrAccount as String: Self.keychainAccount
         ]
-        SecItemDelete(query as CFDictionary)
+        _ = SecItemDelete(query as CFDictionary)
     }
 }

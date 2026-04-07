@@ -1,10 +1,11 @@
 import Foundation
 import EventKit
+import Observation
 
 /// EventKit integration for calendar-driven recording.
 /// Fetches upcoming meetings, enables auto-start/stop based on event times.
-@MainActor
-final class CalendarService: ObservableObject {
+@MainActor @Observable
+final class CalendarService {
 
     struct Meeting: Identifiable, Sendable {
         let id = UUID()
@@ -14,12 +15,10 @@ final class CalendarService: ObservableObject {
         let endDate: Date
         let calendarTitle: String
         let location: String?
-        let notes: String?
-        let url: URL?
     }
 
-    @Published var upcomingMeetings: [Meeting] = []
-    @Published var isAuthorized = false
+    var upcomingMeetings: [Meeting] = []
+    var isAuthorized = false
 
     private let eventStore = EKEventStore()
     private var refreshTimer: Timer?
@@ -67,9 +66,7 @@ final class CalendarService: ObservableObject {
                     startDate: event.startDate,
                     endDate: event.endDate,
                     calendarTitle: event.calendar?.title ?? "",
-                    location: event.location,
-                    notes: event.notes,
-                    url: event.url
+                    location: event.location
                 )
             }
     }

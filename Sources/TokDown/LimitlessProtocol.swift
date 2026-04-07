@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 // MARK: - Minimal Protobuf Encoding (no external deps)
 
@@ -91,15 +92,16 @@ enum Protobuf {
 /// TX characteristic: 632DE002-604C-446B-A80F-7963E950F3FB
 enum LimitlessCommand {
 
-    nonisolated(unsafe) private static var messageIndex: UInt64 = 0
+    private static let _messageIndex = OSAllocatedUnfairLock(initialState: UInt64(0))
 
-    static func reset() { messageIndex = 0 }
+    static func reset() { _messageIndex.withLock { $0 = 0 } }
 
     /// Build the BLE wrapper around a payload.
     /// Fields: 1=index, 2=sequence(0), 3=numFragments(1), 4=payload
     private static func wrapBLE(_ payload: Data) -> Data {
-        let idx = messageIndex
-        messageIndex += 1
+        let idx = _messageIndex.withLock { val -> UInt64 in
+            let current = val; val += 1; return current
+        }
         return Protobuf.fieldVarint(1, idx)
              + Protobuf.fieldVarint(2, 0)
              + Protobuf.fieldVarint(3, 1)
@@ -126,6 +128,14 @@ enum LimitlessCommand {
     static func enableDataStream() -> Data {
         let inner = Protobuf.fieldVarint(1, 0) + Protobuf.fieldVarint(2, 1)
         let payload = Protobuf.fieldMessage(8, inner) + requestData(requestId: 2)
+        return wrapBLE(payload)
+    }
+
+    /// Disable real-time data streaming (stop audio from pendant).
+    /// Payload field 8 = Message(field 1 = batchMode(0), field 2 = realTimeMode(0))
+    static func disableDataStream() -> Data {
+        let inner = Protobuf.fieldVarint(1, 0) + Protobuf.fieldVarint(2, 0)
+        let payload = Protobuf.fieldMessage(8, inner) + requestData(requestId: 3)
         return wrapBLE(payload)
     }
 

@@ -1,24 +1,24 @@
 import Foundation
-import SwiftUI
+import Observation
 
 /// UserDefaults-backed settings store.
-@MainActor
-final class SettingsStore: ObservableObject {
+@MainActor @Observable
+final class SettingsStore {
 
     private let defaults = UserDefaults.standard
 
     /// Whether GitHub PAT has been configured (actual token is in Keychain)
-    @Published var hasGitHubPAT: Bool {
+    var hasGitHubPAT: Bool {
         didSet { defaults.set(hasGitHubPAT, forKey: "hasGitHubPAT") }
     }
 
     /// Default recording mode
-    @Published var recordingMode: SessionManager.RecordingMode {
+    var recordingMode: SessionManager.RecordingMode {
         didSet { defaults.set(recordingMode.rawValue, forKey: "recordingMode") }
     }
 
     /// Auto-push transcripts to GitHub after recording
-    @Published var autoPushEnabled: Bool {
+    var autoPushEnabled: Bool {
         didSet { defaults.set(autoPushEnabled, forKey: "autoPushEnabled") }
     }
 
@@ -26,7 +26,7 @@ final class SettingsStore: ObservableObject {
     let transcriptRepoPath = "intel/transcripts"
 
     /// Vocabulary hints for speech recognition (names, jargon, products)
-    @Published var vocabularyHints: [String] {
+    var vocabularyHints: [String] {
         didSet {
             defaults.set(vocabularyHints, forKey: "vocabularyHints")
         }

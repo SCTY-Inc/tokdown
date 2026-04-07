@@ -1,17 +1,18 @@
 import SwiftUI
+import Observation
 
 @main
-struct TokDownMobileApp: App {
+struct TokDownApp: App {
 
-    @StateObject private var appState = AppState()
+    @State private var appState = AppState()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(appState.session)
-                .environmentObject(appState.ble)
-                .environmentObject(appState.transcription)
-                .environmentObject(appState.calendar)
+                .environment(appState.session)
+                .environment(appState.ble)
+                .environment(appState.transcription)
+                .environment(appState.calendar)
                 .task {
                     await appState.requestPermissions()
                 }
@@ -20,14 +21,14 @@ struct TokDownMobileApp: App {
 }
 
 /// Holds all app-level dependencies. Avoids computed-property recreation issue.
-@MainActor
-final class AppState: ObservableObject {
+@MainActor @Observable
+final class AppState {
 
     let ble = PendantBLE()
     let calendar = CalendarService()
     let transcription = TranscriptionService()
     let settings = SettingsStore()
-    lazy var session: SessionManager = SessionManager(
+    @ObservationIgnored lazy var session: SessionManager = SessionManager(
         ble: ble,
         transcription: transcription,
         calendar: calendar,

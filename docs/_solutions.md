@@ -1,5 +1,20 @@
 # Solutions Log
 
+## 2026-04-07: Limitless Pendant battery drain — enableDataStream sent on every BLE connect
+**Problem**: Pendant battery dying fast. Audio data stream was enabled immediately on every BLE connect (including app launch and reconnects), regardless of whether a recording was active.
+**Root cause**: `startStreamingHandshake()` sent both `timeSync` and `enableDataStream` whenever the RX characteristic started notifying. The pendant's audio encoder and BLE radio stayed active 24/7.
+**Fix**: Split handshake from streaming. `completeHandshake()` only sends `timeSync` on connect. `enableDataStream` is deferred to `startOpusStream()` (called when recording starts). Added `disableDataStream` command (realTimeMode=0) sent on `stopOpusStream()`. Reconnect during recording auto-enables streaming via `handshakeComplete` flag + `opusFrameContinuation` check.
+
+## 2026-04-06: @MainActor on PendantBLE fails in Swift 6 strict concurrency
+**Problem**: Making PendantBLE `@MainActor` causes "conformance crosses into main actor-isolated code" for CBCentralManagerDelegate/CBPeripheralDelegate. Using `nonisolated` + `MainActor.assumeIsolated` then triggers "sending 'dict' risks causing data races" for non-Sendable `[String: Any]` params.
+**Root cause**: Swift 6 region-based isolation analysis treats `MainActor.assumeIsolated` closure captures as potential cross-isolation sends, even though execution is synchronous. `@preconcurrency import CoreBluetooth` suppresses protocol mismatch warnings but not the sending check.
+**Fix**: Keep PendantBLE as non-`@MainActor` `@Observable` class with `@unchecked Sendable`. Thread safety is guaranteed by CBCentralManager `queue: nil` (main queue) invariant, documented in class header. Removed Thread.isMainThread helpers that were unnecessary overhead.
+
+## 2026-04-06: @Observable macro conflicts with lazy var
+**Problem**: `@Observable` on AppState causes "init accessor cannot refer to property '_session'" and "'lazy' cannot be used on a computed property" for `lazy var session: SessionManager`.
+**Root cause**: `@Observable` macro wraps all stored properties with `@ObservationTracked`, which adds init/get/set accessors. `lazy` is implemented as a computed property + backing storage under the hood, conflicting with the macro's expansion.
+**Fix**: Mark with `@ObservationIgnored lazy var session`. This excludes the property from observation tracking, which is correct — views observe session's own `@Observable` properties, not the AppState.session reference itself.
+
 ## 2026-04-02: SFSpeechRecognizer truncates transcripts after ~1 minute
 **Problem**: 32-second recording produced only one `[00:00]` timestamp block, text cut off mid-sentence.
 **Root cause**: SFSpeechRecognizer silently degrades after ~1 minute of continuous audio despite Apple's "no limit" claim for on-device mode. The Omi app avoids this entirely by batching 5-second audio chunks.

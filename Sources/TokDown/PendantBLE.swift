@@ -1,6 +1,6 @@
 import Foundation
 @preconcurrency import CoreBluetooth
-import Combine
+import Observation
 
 /// CoreBluetooth manager for Limitless Pendant.
 ///
@@ -11,7 +11,12 @@ import Combine
 ///   Battery:  standard 0x180F / 0x2A19
 ///
 /// Handshake: subscribe RX notify → write timeSync to TX → write enableDataStream to TX → audio flows on RX.
-final class PendantBLE: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeripheralDelegate, @unchecked Sendable {
+///
+/// Thread safety: CBCentralManager is initialized with queue: nil, dispatching all delegate
+/// callbacks on the main queue. All property mutations and SwiftUI access also occur on main.
+/// @unchecked Sendable is safe under this invariant.
+@Observable
+final class PendantBLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, @unchecked Sendable {
 
     // Limitless Pendant UUIDs
     private static let serviceUUIDString   = "632DE001-604C-446B-A80F-7963E950F3FB"
@@ -19,7 +24,7 @@ final class PendantBLE: NSObject, ObservableObject, CBCentralManagerDelegate, CB
     private static let rxCharUUIDString    = "632DE003-604C-446B-A80F-7963E950F3FB"
     private static let batteryServiceUUID  = "180F"
     private static let batteryLevelUUID    = "2A19"
-    private static let restoreIdentifier   = "com.tokdown-mobile.ble-central"
+    private static let restoreIdentifier   = "com.tokdown.ble-central"
 
     /// Known pendant name prefixes
     private static let knownPrefixes = ["Pendant", "Friend", "Omi", "Limitless", "OpenGlass"]
@@ -31,13 +36,17 @@ final class PendantBLE: NSObject, ObservableObject, CBCentralManagerDelegate, CB
         case connected
     }
 
-    @Published private(set) var connectionState: ConnectionState = .disconnected
-    @Published private(set) var batteryLevel: Int?
-    @Published private(set) var peripheralName: String?
-    @Published private(set) var isStreaming = false
+    private(set) var connectionState: ConnectionState = .disconnected {
+        didSet { onConnectionStateChanged?(connectionState) }
+    }
+    private(set) var batteryLevel: Int?
+    private(set) var peripheralName: String?
+    private(set) var isStreaming = false
 
-    /// Decoded Opus frames (raw Opus data, no protobuf wrapper)
-    let opusFrames = PassthroughSubject<Data, Never>()
+    /// Callback for connection state changes (used by SessionManager for disconnect handling).
+    var onConnectionStateChanged: ((ConnectionState) -> Void)?
+
+    private var opusFrameContinuation: AsyncStream<Data>.Continuation?
 
     private var centralManager: CBCentralManager?
     private var peripheral: CBPeripheral?
@@ -45,6 +54,7 @@ final class PendantBLE: NSObject, ObservableObject, CBCentralManagerDelegate, CB
     private var rxCharacteristic: CBCharacteristic?
     private var reconnectWorkItem: DispatchWorkItem?
     private var needsServiceDiscovery = false
+    private var handshakeComplete = false
     private let reassembler = FragmentReassembler()
 
     // MARK: - Public API
@@ -66,7 +76,7 @@ final class PendantBLE: NSObject, ObservableObject, CBCentralManagerDelegate, CB
 
     func stopScanning() {
         centralManager?.stopScan()
-        updateConnectionState(.disconnected)
+        connectionState = .disconnected
     }
 
     func disconnect() {
@@ -76,7 +86,28 @@ final class PendantBLE: NSObject, ObservableObject, CBCentralManagerDelegate, CB
             centralManager?.cancelPeripheralConnection(peripheral)
         }
         resetPeripheralState()
-        updateConnectionState(.disconnected)
+        connectionState = .disconnected
+    }
+
+    /// Create a new AsyncStream of Opus frames and enable the pendant data stream.
+    /// If handshake hasn't completed yet, defers enableDataStream until it does.
+    func startOpusStream() -> AsyncStream<Data> {
+        opusFrameContinuation?.finish()
+        let (stream, continuation) = AsyncStream.makeStream(of: Data.self, bufferingPolicy: .bufferingNewest(100))
+        opusFrameContinuation = continuation
+        if handshakeComplete {
+            enableStreaming()
+        }
+        // If not yet complete, completeHandshake() will call enableStreaming()
+        // when it finishes and sees opusFrameContinuation is non-nil.
+        return stream
+    }
+
+    /// Disable the pendant data stream and end the Opus frame stream.
+    func stopOpusStream() {
+        disableStreaming()
+        opusFrameContinuation?.finish()
+        opusFrameContinuation = nil
     }
 
     // MARK: - Private
@@ -87,11 +118,12 @@ final class PendantBLE: NSObject, ObservableObject, CBCentralManagerDelegate, CB
         rxCharacteristic = nil
         reassembler.reset()
         LimitlessCommand.reset()
-        updateStreaming(false)
+        handshakeComplete = false
+        isStreaming = false
     }
 
     private func beginScan(using centralManager: CBCentralManager) {
-        updateConnectionState(.scanning)
+        connectionState = .scanning
         centralManager.scanForPeripherals(
             withServices: nil,
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
@@ -107,24 +139,39 @@ final class PendantBLE: NSObject, ObservableObject, CBCentralManagerDelegate, CB
         DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
     }
 
-    /// After RX notify is confirmed, send the handshake commands to start audio streaming.
-    private func startStreamingHandshake() {
-        guard let peripheral, let tx = txCharacteristic else { return }
+    /// After RX notify is confirmed, send timeSync to complete the handshake.
+    /// If a recording stream is already waiting (opusFrameContinuation non-nil),
+    /// automatically enables data streaming after timeSync.
+    private func completeHandshake() {
+        guard peripheral != nil, txCharacteristic != nil else { return }
 
-        let writeType: CBCharacteristicWriteType = .withResponse
-
-        // Step 1: Wait 1s after subscribe, then send time sync
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             guard let self, let peripheral = self.peripheral, let tx = self.txCharacteristic else { return }
-            peripheral.writeValue(LimitlessCommand.timeSync(), for: tx, type: writeType)
+            peripheral.writeValue(LimitlessCommand.timeSync(), for: tx, type: .withResponse)
 
-            // Step 2: Wait 1s more, then enable data stream
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                guard let self, let peripheral = self.peripheral, let tx = self.txCharacteristic else { return }
-                peripheral.writeValue(LimitlessCommand.enableDataStream(), for: tx, type: writeType)
-                self.updateStreaming(true)
+                guard let self else { return }
+                self.handshakeComplete = true
+                // If a recording is already in progress, enable streaming now
+                if self.opusFrameContinuation != nil {
+                    self.enableStreaming()
+                }
             }
         }
+    }
+
+    /// Send enableDataStream to pendant — call when recording starts.
+    private func enableStreaming() {
+        guard let peripheral, let tx = txCharacteristic else { return }
+        peripheral.writeValue(LimitlessCommand.enableDataStream(), for: tx, type: .withResponse)
+        isStreaming = true
+    }
+
+    /// Send disableDataStream to pendant — call when recording stops.
+    private func disableStreaming() {
+        guard let peripheral, let tx = txCharacteristic else { return }
+        peripheral.writeValue(LimitlessCommand.disableDataStream(), for: tx, type: .withResponse)
+        isStreaming = false
     }
 
     /// Process a raw BLE notification from the RX characteristic.
@@ -133,30 +180,8 @@ final class PendantBLE: NSObject, ObservableObject, CBCentralManagerDelegate, CB
 
         let frames = OpusFrameExtractor.extract(from: payload)
         for frame in frames {
-            opusFrames.send(frame)
+            opusFrameContinuation?.yield(frame)
         }
-    }
-
-    // MARK: - Main-thread property updates
-
-    private func updateConnectionState(_ state: ConnectionState) {
-        if Thread.isMainThread { connectionState = state }
-        else { DispatchQueue.main.async { [weak self] in self?.connectionState = state } }
-    }
-
-    private func updatePeripheralName(_ name: String?) {
-        if Thread.isMainThread { peripheralName = name }
-        else { DispatchQueue.main.async { [weak self] in self?.peripheralName = name } }
-    }
-
-    private func updateBatteryLevel(_ level: Int?) {
-        if Thread.isMainThread { batteryLevel = level }
-        else { DispatchQueue.main.async { [weak self] in self?.batteryLevel = level } }
-    }
-
-    private func updateStreaming(_ value: Bool) {
-        if Thread.isMainThread { isStreaming = value }
-        else { DispatchQueue.main.async { [weak self] in self?.isStreaming = value } }
     }
 
     // MARK: - CBCentralManagerDelegate
@@ -167,13 +192,13 @@ final class PendantBLE: NSObject, ObservableObject, CBCentralManagerDelegate, CB
             if needsServiceDiscovery, let peripheral, peripheral.state == .connected {
                 needsServiceDiscovery = false
                 peripheral.discoverServices(nil)
-            } else if let peripheral, peripheral.state == .connecting {
+            } else if let p = self.peripheral, p.state == .connecting {
                 // Restored peripheral still connecting — wait for didConnect
             } else {
                 beginScan(using: central)
             }
         case .poweredOff, .unauthorized, .unsupported:
-            updateConnectionState(.disconnected)
+            connectionState = .disconnected
         default:
             break
         }
@@ -184,15 +209,15 @@ final class PendantBLE: NSObject, ObservableObject, CBCentralManagerDelegate, CB
            let restored = peripherals.first {
             peripheral = restored
             restored.delegate = self
-            updatePeripheralName(restored.name)
+            peripheralName = restored.name
             switch restored.state {
             case .connected:
-                updateConnectionState(.connected)
+                connectionState = .connected
                 needsServiceDiscovery = true
             case .connecting:
-                updateConnectionState(.connecting)
+                connectionState = .connecting
             default:
-                updateConnectionState(.disconnected)
+                connectionState = .disconnected
             }
         }
     }
@@ -212,26 +237,26 @@ final class PendantBLE: NSObject, ObservableObject, CBCentralManagerDelegate, CB
         central.stopScan()
         self.peripheral = peripheral
         peripheral.delegate = self
-        updatePeripheralName(name)
-        updateConnectionState(.connecting)
+        peripheralName = name
+        connectionState = .connecting
         central.connect(peripheral, options: nil)
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         peripheral.delegate = self
-        updateConnectionState(.connected)
-        updatePeripheralName(peripheral.name)
+        connectionState = .connected
+        peripheralName = peripheral.name
         peripheral.discoverServices(nil)
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        updateConnectionState(.disconnected)
+        connectionState = .disconnected
         scheduleReconnect()
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         resetPeripheralState()
-        updateConnectionState(.disconnected)
+        connectionState = .disconnected
         scheduleReconnect()
     }
 
@@ -268,7 +293,7 @@ final class PendantBLE: NSObject, ObservableObject, CBCentralManagerDelegate, CB
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
         let uuid = characteristic.uuid.uuidString.uppercased()
         if uuid == Self.rxCharUUIDString, characteristic.isNotifying, error == nil {
-            startStreamingHandshake()
+            completeHandshake()
         }
     }
 
@@ -277,7 +302,7 @@ final class PendantBLE: NSObject, ObservableObject, CBCentralManagerDelegate, CB
         let uuid = characteristic.uuid.uuidString.uppercased()
 
         if uuid == Self.batteryLevelUUID {
-            updateBatteryLevel(data.first.map(Int.init))
+            batteryLevel = data.first.map(Int.init)
         } else if uuid == Self.rxCharUUIDString {
             handleRxData(data)
         }

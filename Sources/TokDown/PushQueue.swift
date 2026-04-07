@@ -1,10 +1,11 @@
 import Foundation
 import Network
+import Observation
 
 /// Queues GitHub pushes with retry and offline support.
 /// Persists queue to Documents/push-queue.json. Drains on launch and connectivity change.
-@MainActor
-final class PushQueue: ObservableObject {
+@MainActor @Observable
+final class PushQueue {
 
     struct PendingPush: Codable, Identifiable {
         let id: UUID
@@ -15,15 +16,15 @@ final class PushQueue: ObservableObject {
         var retryCount: Int = 0
     }
 
-    @Published private(set) var pendingCount = 0
+    private(set) var pendingCount = 0
 
     private var queue: [PendingPush] = []
     private let github = GitHubSync()
     private let monitor = NWPathMonitor()
     private var isDraining = false
 
-    private var queueURL: URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+    private var queueURL: URL? {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
             .appendingPathComponent("push-queue.json")
     }
 
@@ -81,7 +82,8 @@ final class PushQueue: ObservableObject {
     // MARK: - Persistence
 
     private func loadQueue() {
-        guard let data = try? Data(contentsOf: queueURL),
+        guard let url = queueURL,
+              let data = try? Data(contentsOf: url),
               let items = try? JSONDecoder().decode([PendingPush].self, from: data) else {
             return
         }
@@ -90,8 +92,8 @@ final class PushQueue: ObservableObject {
     }
 
     private func saveQueue() {
-        guard let data = try? JSONEncoder().encode(queue) else { return }
-        try? data.write(to: queueURL, options: .atomic)
+        guard let url = queueURL, let data = try? JSONEncoder().encode(queue) else { return }
+        try? data.write(to: url, options: .atomic)
     }
 
     // MARK: - Network Monitoring
@@ -104,6 +106,6 @@ final class PushQueue: ObservableObject {
                 }
             }
         }
-        monitor.start(queue: DispatchQueue(label: "com.tokdown-mobile.network-monitor"))
+        monitor.start(queue: DispatchQueue(label: "com.tokdown.network-monitor"))
     }
 }

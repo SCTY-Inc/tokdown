@@ -1,6 +1,7 @@
 import Foundation
 import Speech
 import AVFoundation
+import Observation
 
 /// On-device speech recognition using SFSpeechRecognizer.
 ///
@@ -8,8 +9,8 @@ import AVFoundation
 /// SFSpeechRecognizer silently degrades after ~1 minute of continuous audio,
 /// so we restart the recognition task every `chunkDuration` seconds with
 /// audio overlap to avoid gaps at boundaries.
-@MainActor
-final class TranscriptionService: ObservableObject {
+@MainActor @Observable
+final class TranscriptionService {
 
     struct TranscriptLine: Sendable {
         let timestamp: TimeInterval
@@ -21,8 +22,9 @@ final class TranscriptionService: ObservableObject {
         let lines: [TranscriptLine]
     }
 
-    @Published var isTranscribing = false
-    @Published var fullText: String = ""
+    var isTranscribing = false
+    var fullText: String = ""
+    var lastError: String?
 
     /// Accumulated lines across all chunks, with absolute timestamps.
     private(set) var lines: [TranscriptLine] = []
@@ -83,7 +85,11 @@ final class TranscriptionService: ObservableObject {
         guard !isTranscribing else { return }
 
         recognizer = SFSpeechRecognizer(locale: Locale.current)
-        guard let recognizer, recognizer.isAvailable else { return }
+        guard let recognizer, recognizer.isAvailable else {
+            lastError = "Speech recognition unavailable for \(Locale.current.identifier)"
+            return
+        }
+        lastError = nil
 
         audioFormat = AVAudioFormat(
             commonFormat: .pcmFormatInt16,

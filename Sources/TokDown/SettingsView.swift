@@ -3,14 +3,15 @@ import SwiftUI
 /// Settings screen: GitHub PAT, recording mode, connection status, app version.
 struct SettingsView: View {
 
-    @EnvironmentObject var session: SessionManager
-    @EnvironmentObject var ble: PendantBLE
+    @Environment(SessionManager.self) var session
+    @Environment(PendantBLE.self) var ble
     @State private var patInput: String = ""
     @State private var showPATSaved = false
 
     private let github = GitHubSync()
 
     var body: some View {
+        @Bindable var session = session
         Form {
             Section("GitHub") {
                 SecureField("Personal Access Token", text: $patInput)
