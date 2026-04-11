@@ -19,7 +19,13 @@ fi
 
 SWIFT_CONFIG="${CONFIG}"
 echo "Building ${TARGET_NAME} (${SWIFT_CONFIG})..."
-swift build -c "$SWIFT_CONFIG"
+# Pipe through xcbeautify for parseable output when available (graceful fallback to cat).
+# set -o pipefail above ensures swift build failures still propagate through the pipe. [Rule 11]
+if command -v xcbeautify >/dev/null 2>&1; then
+  swift build -c "$SWIFT_CONFIG" 2>&1 | xcbeautify
+else
+  swift build -c "$SWIFT_CONFIG"
+fi
 
 resolve_binary_path() {
   local binary=""
@@ -54,21 +60,29 @@ cp "${PROJECT_DIR}/Sources/${TARGET_NAME}/Resources/TokDownMenuIdle.svg" "${APP_
 cp "${PROJECT_DIR}/Sources/${TARGET_NAME}/Resources/TokDownMenuRecording.svg" "${APP_BUNDLE_PATH}/Contents/Resources/" || true
 cp "${PROJECT_DIR}/Sources/${TARGET_NAME}/Resources/TokDownMenuTranscribing.svg" "${APP_BUNDLE_PATH}/Contents/Resources/" || true
 
-# Generate .icns from SVG (macOS-native toolchain, no deps)
+# Generate .icns from app icon source (prefer PNG, fall back to SVG via qlmanage).
+ICON_PNG="${PROJECT_DIR}/Sources/${TARGET_NAME}/Resources/TokDownIcon.png"
 ICON_SVG="${PROJECT_DIR}/Sources/${TARGET_NAME}/Resources/TokDownIcon.svg"
 ICONSET_DIR="${PROJECT_DIR}/.build/TokDown.iconset"
 ICNS_FILE="${APP_BUNDLE_PATH}/Contents/Resources/TokDown.icns"
+MASTER_PNG=""
 
-if [[ -f "$ICON_SVG" ]]; then
-  echo "Generating app icon..."
+if [[ -f "$ICON_PNG" ]]; then
+  echo "Generating app icon (PNG source)..."
   rm -rf "$ICONSET_DIR"
   mkdir -p "$ICONSET_DIR"
-
-  # Rasterize SVG to 1024px PNG via qlmanage (ships with macOS)
+  MASTER_PNG="${PROJECT_DIR}/.build/icon_master_1024.png"
+  cp "$ICON_PNG" "$MASTER_PNG"
+elif [[ -f "$ICON_SVG" ]]; then
+  echo "Generating app icon (SVG source)..."
+  rm -rf "$ICONSET_DIR"
+  mkdir -p "$ICONSET_DIR"
   MASTER_PNG="${PROJECT_DIR}/.build/icon_master_1024.png"
   qlmanage -t -s 1024 -o "${PROJECT_DIR}/.build" "$ICON_SVG" >/dev/null 2>&1
   mv "${PROJECT_DIR}/.build/TokDownIcon.svg.png" "$MASTER_PNG"
+fi
 
+if [[ -n "$MASTER_PNG" && -f "$MASTER_PNG" ]]; then
   # Generate all required sizes for macOS .iconset
   for size in 16 32 128 256 512; do
     sips -z $size $size "$MASTER_PNG" --out "${ICONSET_DIR}/icon_${size}x${size}.png" >/dev/null 2>&1

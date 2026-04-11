@@ -157,7 +157,8 @@ Sources/TokDown/
 └── Resources/
     ├── Info.plist
     ├── TokDown.entitlements
-    └── TokDownIcon.svg         # App icon source (→ .icns at build time)
+    ├── TokDownIcon.png         # Preferred app icon source (→ .icns at build time)
+    └── TokDownIcon.svg         # Fallback icon source
 ```
 
 ## License

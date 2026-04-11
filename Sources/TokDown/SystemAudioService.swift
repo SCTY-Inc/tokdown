@@ -68,6 +68,8 @@ final class SystemAudioService: NSObject {
 }
 
 private final class AudioOutputHandler: NSObject, SCStreamOutput {
+    // Invariant: all writer access wrapped by `queue` — see capture callback and `finish()`.
+    // Rationale: ScreenCaptureKit capture runs on its own queue; writer mutations must be serialized.
     nonisolated(unsafe) private let writer: AVAssetWriter
     nonisolated(unsafe) private let input: AVAssetWriterInput
     private let queue = DispatchQueue(label: "audio.writer")
