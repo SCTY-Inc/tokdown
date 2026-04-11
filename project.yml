@@ -35,3 +35,16 @@ targets:
         SUPPORTS_MACCATALYST: NO
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
         TARGETED_DEVICE_FAMILY: "1"
+  TokDownTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: Tests/TokDownTests
+    dependencies:
+      - target: TokDown
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.amadad.tokdown.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1"

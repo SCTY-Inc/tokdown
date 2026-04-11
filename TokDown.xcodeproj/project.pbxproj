@@ -11,6 +11,7 @@
 		1D391DCC4F02595E75C77823 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EBCB157602A299C83E0D30F /* SettingsView.swift */; };
 		252B95C6ECC0620DF75DB5E3 /* Opus in Frameworks */ = {isa = PBXBuildFile; productRef = 9CFB173F599903C014ED62E5 /* Opus */; };
 		2BC796466721583B970504DC /* CalendarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCA1339080FE6BCCCD69117D /* CalendarService.swift */; };
+		3464B2DFF922FB174FAE19C9 /* TranscriptFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6528D7C79826AB20BD98A600 /* TranscriptFormatterTests.swift */; };
 		3997038CEF37C9D263B8222E /* PendantBLE.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E0091BA16A45667586600B3 /* PendantBLE.swift */; };
 		42B170C0B6BB58EC462BC965 /* DebugLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7560B8DC76C9C549D5218615 /* DebugLog.swift */; };
 		5CC46CC10519FF79C305C765 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C444F28D5F466A3E9367FD2D /* SettingsStore.swift */; };
@@ -25,11 +26,22 @@
 		CDF2CB80A75F011C58F49D06 /* LimitlessProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0141CB36E04D4861275E68F /* LimitlessProtocol.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		9CA77FD55F7015C06D3DAAF6 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = AFD2FBB6F5EBB7DD47E39FB4 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 669A733139B734037ADF5BC4;
+			remoteInfo = TokDown;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		0A655E4FC9D1E24AD594F27F /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		0EBCB157602A299C83E0D30F /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		2E0091BA16A45667586600B3 /* PendantBLE.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendantBLE.swift; sourceTree = "<group>"; };
 		4D3433B698F3DBC39DA5E291 /* TranscriptFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptFormatter.swift; sourceTree = "<group>"; };
+		6528D7C79826AB20BD98A600 /* TranscriptFormatterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptFormatterTests.swift; sourceTree = "<group>"; };
 		72E2E12B298F27D1A50D275E /* SessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManager.swift; sourceTree = "<group>"; };
 		7560B8DC76C9C549D5218615 /* DebugLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugLog.swift; sourceTree = "<group>"; };
 		7F27A8C122CA2609FA6430E3 /* TranscriptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionService.swift; sourceTree = "<group>"; };
@@ -38,6 +50,7 @@
 		93B71C281CA11E52B9557ACA /* GitHubSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubSync.swift; sourceTree = "<group>"; };
 		A5CF4C77C6431292536368A4 /* OpusStreamDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpusStreamDecoder.swift; sourceTree = "<group>"; };
 		B0141CB36E04D4861275E68F /* LimitlessProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LimitlessProtocol.swift; sourceTree = "<group>"; };
+		B2D2258862F7C35468CE104F /* TokDownTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TokDownTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B7361350D8B378AC06E19D6C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		BFA9900AEB0EF66DDFA7701F /* TokDown.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TokDown.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C444F28D5F466A3E9367FD2D /* SettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStore.swift; sourceTree = "<group>"; };
@@ -85,6 +98,7 @@
 			isa = PBXGroup;
 			children = (
 				BFA9900AEB0EF66DDFA7701F /* TokDown.app */,
+				B2D2258862F7C35468CE104F /* TokDownTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -93,13 +107,41 @@
 			isa = PBXGroup;
 			children = (
 				740EE18DFC1A1A1B4C0E69A4 /* TokDown */,
+				EBD9E322967592CA2BFEA7E5 /* TokDownTests */,
 				944F4EE1DA84851A5FBECAF9 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		EBD9E322967592CA2BFEA7E5 /* TokDownTests */ = {
+			isa = PBXGroup;
+			children = (
+				6528D7C79826AB20BD98A600 /* TranscriptFormatterTests.swift */,
+			);
+			name = TokDownTests;
+			path = Tests/TokDownTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		11CD0118986EE3C9E891AA24 /* TokDownTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B5140123339F690BCCC968DD /* Build configuration list for PBXNativeTarget "TokDownTests" */;
+			buildPhases = (
+				57069151C4967FFA4D24C5B9 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D189ABF98EA280D452E2E608 /* PBXTargetDependency */,
+			);
+			name = TokDownTests;
+			packageProductDependencies = (
+			);
+			productName = TokDownTests;
+			productReference = B2D2258862F7C35468CE104F /* TokDownTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		669A733139B734037ADF5BC4 /* TokDown */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 0D669172084DF2836DBA3DA7 /* Build configuration list for PBXNativeTarget "TokDown" */;
@@ -153,6 +195,7 @@
 			projectRoot = "";
 			targets = (
 				669A733139B734037ADF5BC4 /* TokDown */,
+				11CD0118986EE3C9E891AA24 /* TokDownTests */,
 			);
 		};
 /* End PBXProject section */
@@ -190,7 +233,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		57069151C4967FFA4D24C5B9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3464B2DFF922FB174FAE19C9 /* TranscriptFormatterTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		D189ABF98EA280D452E2E608 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 669A733139B734037ADF5BC4 /* TokDown */;
+			targetProxy = 9CA77FD55F7015C06D3DAAF6 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		23974E88116A151B0B45B52C /* Debug */ = {
@@ -337,6 +396,42 @@
 			};
 			name = Release;
 		};
+		A52BCF6DD4368B32703DC35F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.amadad.tokdown.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TokDown.app/TokDown";
+			};
+			name = Debug;
+		};
+		AF9CF446923D5BD548A74EF6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.amadad.tokdown.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TokDown.app/TokDown";
+			};
+			name = Release;
+		};
 		C8E4083DABD3679A8564A6C4 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -370,6 +465,15 @@
 			buildConfigurations = (
 				C8E4083DABD3679A8564A6C4 /* Debug */,
 				8D7E5393BCF53570378502D0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B5140123339F690BCCC968DD /* Build configuration list for PBXNativeTarget "TokDownTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A52BCF6DD4368B32703DC35F /* Debug */,
+				AF9CF446923D5BD548A74EF6 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

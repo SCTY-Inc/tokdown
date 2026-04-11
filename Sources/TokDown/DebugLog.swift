@@ -5,6 +5,8 @@ import Foundation
 enum DebugLog {
     #if DEBUG
     private static let lock = NSLock()
+    // Invariant: all access wrapped in `lock.lock()/unlock()` — see `write(_:)` below.
+    // Removal plan: replace with Mutex or an actor when DebugLog is allowed to be async.
     nonisolated(unsafe) private static var fileHandle: FileHandle?
     nonisolated(unsafe) private static var lineCount = 0
 
@@ -13,7 +15,9 @@ enum DebugLog {
         defer { lock.unlock() }
 
         if fileHandle == nil {
-            let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+                return
+            }
             let url = docs.appendingPathComponent("debug.log")
             FileManager.default.createFile(atPath: url.path, contents: nil)
             fileHandle = try? FileHandle(forWritingTo: url)
