@@ -105,6 +105,12 @@ bash scripts/build-app.sh debug
 open TokDown.app
 ```
 
+If your Mac has multiple code-signing identities, select one explicitly:
+
+```bash
+SIGNING_IDENTITY="Apple Development: Your Name (TEAMID)" bash scripts/build-app.sh debug
+```
+
 TokDown is a menu bar app — it lives in the menu bar, not the Dock.
 
 Release build:

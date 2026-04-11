@@ -100,11 +100,22 @@ fi
   "${APP_BUNDLE_PATH}/Contents/Info.plist" >/dev/null 2>&1 || true
 
 echo "Signing ${APP_BUNDLE_NAME}..."
-IDENTITY=$(security find-identity -v -p codesigning | head -1 | sed 's/.*"\(.*\)".*/\1/')
-if [[ -z "$IDENTITY" ]]; then
+mapfile -t IDENTITIES < <(security find-identity -v -p codesigning | sed -n 's/.*"\(.*\)".*/\1/p')
+
+if [[ -n "${SIGNING_IDENTITY:-}" ]]; then
+  IDENTITY="${SIGNING_IDENTITY}"
+elif [[ ${#IDENTITIES[@]} -eq 0 ]]; then
   echo "No signing identity found, using ad-hoc signing..."
   IDENTITY="-"
+elif [[ ${#IDENTITIES[@]} -eq 1 ]]; then
+  IDENTITY="${IDENTITIES[0]}"
+else
+  echo "Multiple signing identities found. Set SIGNING_IDENTITY to choose explicitly." >&2
+  printf '  - %s\n' "${IDENTITIES[@]}" >&2
+  IDENTITY="${IDENTITIES[0]}"
+  echo "Defaulting to first identity: ${IDENTITY}" >&2
 fi
+
 echo "Signing with: ${IDENTITY}"
 codesign --force --sign "$IDENTITY" --entitlements "$ENTITLEMENTS_SOURCE" \
   --deep "${APP_BUNDLE_PATH}"
