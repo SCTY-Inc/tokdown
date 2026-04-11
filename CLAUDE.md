@@ -9,7 +9,7 @@ Sibling: [TokDown for macOS](https://github.com/amadad/tokdown)
 xcodegen generate                    # regenerate xcodeproj from project.yml (required after adding files)
 open TokDown.xcodeproj               # Xcode app target with Info.plist + device install support
 # CLI deploy:
-xcodebuild -project TokDown.xcodeproj -scheme TokDown -destination 'generic/platform=iOS' -derivedDataPath .build/DerivedData -configuration Debug build
+xcodebuild -project TokDown.xcodeproj -scheme TokDown -destination 'generic/platform=iOS' -derivedDataPath .build/DerivedData -configuration Debug DEVELOPMENT_TEAM=<TEAM_ID> build
 xcrun devicectl device install app --device <UDID> .build/DerivedData/Build/Products/Debug-iphoneos/TokDown.app
 xcrun devicectl device process launch --device <UDID> com.amadad.tokdown
 ```

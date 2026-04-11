@@ -12,6 +12,8 @@ final class PushQueue {
         let filename: String
         let content: String
         let commitMessage: String
+        let repo: String
+        let basePath: String
         let createdAt: Date
         var retryCount: Int = 0
     }
@@ -34,12 +36,14 @@ final class PushQueue {
     }
 
     /// Add a transcript to the push queue and attempt immediate push.
-    func enqueue(filename: String, content: String, commitMessage: String) {
+    func enqueue(filename: String, content: String, commitMessage: String, repo: String, basePath: String) {
         let item = PendingPush(
             id: UUID(),
             filename: filename,
             content: content,
             commitMessage: commitMessage,
+            repo: repo,
+            basePath: basePath,
             createdAt: Date()
         )
         queue.append(item)
@@ -61,7 +65,9 @@ final class PushQueue {
                     try await github.push(
                         filename: item.filename,
                         content: item.content,
-                        commitMessage: item.commitMessage
+                        commitMessage: item.commitMessage,
+                        repo: item.repo,
+                        basePath: item.basePath
                     )
                 } catch {
                     var retry = item

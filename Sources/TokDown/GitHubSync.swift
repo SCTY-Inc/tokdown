@@ -14,23 +14,23 @@ actor GitHubSync {
         case networkError(Error)
     }
 
-    var repo: String = ""
-    var basePath: String = "intel/transcripts"
     private static let keychainService = "tokdown"
     private static let keychainAccount = "github-pat"
-
-    /// Configure the target repo and path.
-    func configure(repo: String, basePath: String) {
-        self.repo = repo
-        self.basePath = basePath
-    }
 
     /// Push a transcript markdown file to GitHub.
     /// - Parameters:
     ///   - filename: e.g. "2026-04-01_10-00_Standup.md"
     ///   - content: Full markdown string
     ///   - commitMessage: e.g. "transcript: Standup"
-    func push(filename: String, content: String, commitMessage: String) async throws {
+    ///   - repo: GitHub repository in `owner/name` form
+    ///   - basePath: Directory path inside the repository
+    func push(
+        filename: String,
+        content: String,
+        commitMessage: String,
+        repo: String,
+        basePath: String
+    ) async throws {
         guard !repo.isEmpty else {
             throw SyncError.missingRepo
         }
@@ -43,7 +43,7 @@ actor GitHubSync {
         }
         let base64Content = contentData.base64EncodedString()
 
-        let existingSHA = try await checkExisting(filename: filename)
+        let existingSHA = try await checkExisting(filename: filename, repo: repo, basePath: basePath, pat: pat)
 
         let urlString = "https://api.github.com/repos/\(repo)/contents/\(basePath)/\(filename)"
         guard let url = URL(string: urlString) else {
@@ -86,11 +86,7 @@ actor GitHubSync {
     /// Check if a transcript already exists on GitHub.
     /// - Parameter filename: File name within basePath
     /// - Returns: The file's SHA if it exists, nil otherwise
-    func checkExisting(filename: String) async throws -> String? {
-        guard let pat = loadPAT() else {
-            throw SyncError.missingPAT
-        }
-
+    private func checkExisting(filename: String, repo: String, basePath: String, pat: String) async throws -> String? {
         let urlString = "https://api.github.com/repos/\(repo)/contents/\(basePath)/\(filename)"
         guard let url = URL(string: urlString) else { return nil }
 

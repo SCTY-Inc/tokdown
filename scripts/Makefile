@@ -27,6 +27,10 @@ SIMULATOR   ?= iPhone 17
 #   make -f scripts/Makefile install DEVICE_UDID=00008120-000XXXXXXXXXXXX
 DEVICE_UDID ?=
 
+# Signing team is externalized in project.yml. Pass it when building for a device:
+#   make -f scripts/Makefile build DEVELOPMENT_TEAM=683DJ66L4U
+DEVELOPMENT_TEAM ?=
+
 # Resolve repo root (parent of this Makefile's directory)
 REPO_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 
@@ -35,6 +39,7 @@ APP_PATH = $(REPO_ROOT)/$(DERIVED)/Build/Products/$(CONFIG)-iphoneos/$(SCHEME).a
 
 # xcbeautify if available, cat as graceful fallback — pipefail still catches failures
 XCB := $(shell command -v xcbeautify >/dev/null 2>&1 && echo "xcbeautify --disable-logging" || echo "cat")
+XCODEBUILD_OVERRIDES := $(if $(strip $(DEVELOPMENT_TEAM)),DEVELOPMENT_TEAM=$(DEVELOPMENT_TEAM),)
 
 # ─── TARGETS ──────────────────────────────────────────────────────────────────
 
@@ -62,6 +67,7 @@ build:
 	  -destination 'generic/platform=iOS' \
 	  -derivedDataPath $(DERIVED) \
 	  -configuration $(CONFIG) \
+	  $(XCODEBUILD_OVERRIDES) \
 	  build | $(XCB)
 
 ## test — run unit tests on simulator (override with SIMULATOR="iPhone 17 Pro")

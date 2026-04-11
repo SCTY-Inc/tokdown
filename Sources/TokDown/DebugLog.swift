@@ -29,7 +29,6 @@ enum DebugLog {
         if let data = line.data(using: .utf8) {
             fh.seekToEndOfFile()
             fh.write(data)
-            fh.synchronizeFile()
         }
     }
     #else

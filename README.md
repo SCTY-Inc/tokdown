@@ -39,6 +39,16 @@ xcodegen generate
 open TokDown.xcodeproj
 ```
 
+For CLI device builds, pass your signing team explicitly:
+
+```bash
+xcodebuild -project TokDown.xcodeproj -scheme TokDown \
+  -destination 'generic/platform=iOS' \
+  -derivedDataPath .build/DerivedData \
+  -configuration Debug \
+  DEVELOPMENT_TEAM=<TEAM_ID> build
+```
+
 Add your GitHub PAT in the app's Settings screen. Transcripts push to the configured repo.
 
 ## Architecture

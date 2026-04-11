@@ -368,12 +368,13 @@ struct TranscriptDetailView: View {
         guard let url = transcript.fileURL else { return }
         let filename = url.lastPathComponent
         Task {
-            await github.configure(repo: session.settings.transcriptRepo, basePath: session.settings.transcriptRepoPath)
             do {
                 try await github.push(
                     filename: filename,
                     content: content,
-                    commitMessage: "update: \(transcript.title)"
+                    commitMessage: "update: \(transcript.title)",
+                    repo: session.settings.transcriptRepo,
+                    basePath: session.settings.transcriptRepoPath
                 )
                 showStatus("Pushed")
             } catch {

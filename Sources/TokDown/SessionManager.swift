@@ -216,12 +216,24 @@ final class SessionManager {
     private func processOpusFrame(_ frame: Data) {
         guard let samples = opusDecoder?.decode(opusFrame: frame) else {
             decodeFailCount += 1
-            DebugLog.write("opus decode FAIL #\(decodeFailCount) frameLen=\(frame.count) decoder=\(opusDecoder != nil)")
+            if shouldLogDecodeFailure(count: decodeFailCount) {
+                DebugLog.write("opus decode FAIL #\(decodeFailCount) frameLen=\(frame.count) decoder=\(opusDecoder != nil)")
+            }
             return
         }
         decodedFrameCount += 1
-        DebugLog.write("decoded #\(decodedFrameCount) samples=\(samples.count)")
+        if shouldLogDecodedFrame(count: decodedFrameCount) {
+            DebugLog.write("decoded #\(decodedFrameCount) samples=\(samples.count)")
+        }
         transcription.appendAudio(samples: samples)
+    }
+
+    private func shouldLogDecodedFrame(count: Int) -> Bool {
+        count <= 3 || count.isMultiple(of: 50)
+    }
+
+    private func shouldLogDecodeFailure(count: Int) -> Bool {
+        count <= 5 || count.isMultiple(of: 25)
     }
 
     private func checkCalendarState() {
@@ -241,13 +253,12 @@ final class SessionManager {
         startTime: Date,
         fileURL: URL? = nil
     ) {
-        Task {
-            await pushQueue.github.configure(repo: settings.transcriptRepo, basePath: settings.transcriptRepoPath)
-        }
         pushQueue.enqueue(
             filename: doc.filename,
             content: doc.markdown,
-            commitMessage: "transcript: \(doc.title)"
+            commitMessage: "transcript: \(doc.title)",
+            repo: settings.transcriptRepo,
+            basePath: settings.transcriptRepoPath
         )
         addRecentTranscript(title: doc.title, date: startTime, pushed: true, fileURL: fileURL)
         resetToIdle()
