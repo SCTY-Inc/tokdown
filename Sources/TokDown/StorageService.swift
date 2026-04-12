@@ -78,6 +78,7 @@ final class StorageService {
 
     private func makeBaseName(title: String, startTime: Date) -> String {
         let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd_HH-mm"
         return "\(formatter.string(from: startTime))_\(sanitize(title))"
     }

@@ -13,12 +13,12 @@ final class StorageServiceTests: XCTestCase {
 
         let second = try service.sessionArtifacts(folderBase: folder, title: "Weekly Sync", startTime: startTime)
 
-        let prefix = expectedDatePrefix(for: startTime)
+        let expectedBase = expectedBaseName(for: startTime, title: "Weekly Sync")
 
-        XCTAssertEqual(first.audioURL.lastPathComponent, "\(prefix)_Weekly Sync.m4a")
-        XCTAssertEqual(first.transcriptURL.lastPathComponent, "\(prefix)_Weekly Sync.md")
-        XCTAssertEqual(second.audioURL.lastPathComponent, "\(prefix)_Weekly Sync-2.m4a")
-        XCTAssertEqual(second.transcriptURL.lastPathComponent, "\(prefix)_Weekly Sync-2.md")
+        XCTAssertEqual(first.audioURL.lastPathComponent, "\(expectedBase).m4a")
+        XCTAssertEqual(first.transcriptURL.lastPathComponent, "\(expectedBase).md")
+        XCTAssertEqual(second.audioURL.lastPathComponent, "\(expectedBase)-2.m4a")
+        XCTAssertEqual(second.transcriptURL.lastPathComponent, "\(expectedBase)-2.md")
     }
 
     func testTranscriptURLAddsSuffixWithoutChangingDateFirstPrefix() throws {
@@ -31,11 +31,12 @@ final class StorageServiceTests: XCTestCase {
 
         let next = service.transcriptURL(folderBase: folder, title: "Recording", startTime: startTime)
 
-        let prefix = expectedDatePrefix(for: startTime)
+        let expectedBase = expectedBaseName(for: startTime, title: "Recording")
+        let expectedPrefix = expectedDatePrefix(for: startTime)
 
-        XCTAssertEqual(existing.lastPathComponent, "\(prefix)_Recording.md")
-        XCTAssertEqual(next.lastPathComponent, "\(prefix)_Recording-2.md")
-        XCTAssertTrue(next.lastPathComponent.hasPrefix("\(prefix)_"))
+        XCTAssertEqual(existing.lastPathComponent, "\(expectedBase).md")
+        XCTAssertEqual(next.lastPathComponent, "\(expectedBase)-2.md")
+        XCTAssertTrue(next.lastPathComponent.hasPrefix("\(expectedPrefix)_"))
     }
 
     func testDeleteFileReportsSuccessAndFailure() throws {
@@ -69,8 +70,13 @@ final class StorageServiceTests: XCTestCase {
         return formatter.date(from: value)!
     }
 
+    private func expectedBaseName(for date: Date, title: String) -> String {
+        "\(expectedDatePrefix(for: date))_\(title)"
+    }
+
     private func expectedDatePrefix(for date: Date) -> String {
         let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd_HH-mm"
         return formatter.string(from: date)
     }
