@@ -39,16 +39,21 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertTrue(next.lastPathComponent.hasPrefix("\(expectedPrefix)_"))
     }
 
-    func testDeleteFileReportsSuccessAndFailure() throws {
-        let folder = try makeTempFolder()
-        let service = StorageService()
-        let fileURL = folder.appendingPathComponent("sample.m4a")
-        FileManager.default.createFile(atPath: fileURL.path, contents: Data("audio".utf8))
+    func testDeleteFileUsesPermanentRemovalInsteadOfTrash() {
+        let fileURL = URL(fileURLWithPath: "/tmp/sample.m4a")
+        let fileManager = TrackingFileManager()
+        let service = StorageService(fileManager: fileManager)
 
         XCTAssertEqual(service.deleteFile(fileURL), .deleted)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+        XCTAssertEqual(fileManager.removedURLs, [fileURL])
+        XCTAssertTrue(fileManager.trashedURLs.isEmpty)
+    }
 
+    func testDeleteFileReportsFailureForMissingFile() throws {
+        let folder = try makeTempFolder()
+        let service = StorageService()
         let missingURL = folder.appendingPathComponent("missing.m4a")
+
         guard case .failed(let message) = service.deleteFile(missingURL) else {
             return XCTFail("Expected delete failure for missing file")
         }
@@ -79,5 +84,18 @@ final class StorageServiceTests: XCTestCase {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd_HH-mm"
         return formatter.string(from: date)
+    }
+}
+
+private final class TrackingFileManager: FileManager {
+    private(set) var removedURLs: [URL] = []
+    private(set) var trashedURLs: [URL] = []
+
+    override func removeItem(at url: URL) throws {
+        removedURLs.append(url)
+    }
+
+    override func trashItem(at url: URL, resultingItemURL outResultingURL: AutoreleasingUnsafeMutablePointer<NSURL?>?) throws {
+        trashedURLs.append(url)
     }
 }

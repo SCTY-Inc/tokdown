@@ -34,7 +34,7 @@ Most transcription tools trap your notes in another app or SaaS dashboard. TokDo
 
 - Record meetings, calls, demos, and research audio from system audio or your microphone
 - Get timestamped markdown with YAML front matter (calendar metadata, attendees, links)
-- No audio files kept — transcription in, markdown out, audio deleted
+- No audio files kept — transcription in, markdown out, audio deleted permanently
 - No dependencies, no accounts, no API keys
 - ~1,200 lines of Swift, no external packages
 
@@ -45,7 +45,7 @@ Most transcription tools trap your notes in another app or SaaS dashboard. TokDo
 3. Open Settings any time to choose whether TokDown records System Audio or Microphone by default
 4. Stop when done
 5. TokDown transcribes and saves a `.md` file — typically in under a minute
-6. The audio file is deleted automatically
+6. The audio file is deleted permanently
 
 Transcripts are saved to `~/Documents/Transcripts/` by default:
 
@@ -54,7 +54,7 @@ Transcripts are saved to `~/Documents/Transcripts/` by default:
 2026-03-09_18-00_Quarterly_planning_kickoff.md
 ```
 
-Meeting recordings use the calendar event title. Manual recordings infer a title from the transcript text.
+Meeting recordings use the calendar event title. Manual recordings infer a title from the transcript text. If two recordings share the same title within the same minute, TokDown appends `-2`, `-3`, and so on instead of overwriting the earlier file.
 
 ## Transcript format
 
@@ -130,12 +130,12 @@ Open **Settings** from the menu bar to change the save folder and persist the de
 
 ## Permissions
 
-On first launch, macOS will prompt for:
+On first relevant use, macOS may prompt for:
 
 - **Screen Recording** — captures system audio via ScreenCaptureKit when System Audio is selected
 - **Microphone** — captures live microphone input when Microphone is selected
-- **Speech Recognition** — runs the on-device transcription model
-- **Calendar** (optional) — shows upcoming meetings in the menu
+- **Speech Recognition** — checked before recording starts because transcription is required for the end-to-end flow
+- **Calendar** (optional, full access) — shows upcoming meetings in the menu; write-only access is not enough to read them
 
 ## Stack
 

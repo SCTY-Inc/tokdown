@@ -1,6 +1,6 @@
 # CLAUDE.md — TokDown
 
-macOS menu bar app: system audio → transcript markdown. ~1.2k app LOC, small XCTest coverage, no deps.
+macOS menu bar app: system audio → transcript markdown. ~1.2k app LOC, focused XCTest coverage, no deps.
 
 ## Build & Run
 ```bash
@@ -11,7 +11,7 @@ bash scripts/build-app.sh debug && open TokDown.app
 3 states: idle → recording → transcribing. See AGENTS.md for full architecture.
 
 ## Output
-`~/Documents/Transcripts/YYYY-MM-DD_HH-mm_Title.md` — date-first filenames, YAML front matter + markdown body, no audio files, git-friendly.
+`~/Documents/Transcripts/YYYY-MM-DD_HH-mm_Title[-2].md` — date-first filenames, collision-safe suffixing, YAML front matter + markdown body, no audio files, git-friendly.
 
 ## Gotchas
 - Swift 6 concurrency: no `Task { @MainActor in }` inside completion handlers
@@ -19,3 +19,6 @@ bash scripts/build-app.sh debug && open TokDown.app
 - ScreenCaptureKit needs video config even for audio-only (2x2 @ 1fps)
 - Core Audio Taps migration blocked by libdispatch main-thread assertion crash on macOS 26 — tried AVAssetWriter, AVAudioFile, ExtAudioFile, all crash identically. Needs Xcode thread sanitizer debugging. Track via AudioCap (insidegui/AudioCap) patterns.
 - Code signing required for TCC permissions
+- Speech recognition permission is preflighted before recording can start.
+- Calendar meeting loading requires full access; write-only access should surface an upgrade-required state.
+- Raw audio cleanup must permanently remove files, not move them to Trash.

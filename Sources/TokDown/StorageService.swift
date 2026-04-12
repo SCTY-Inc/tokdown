@@ -41,7 +41,7 @@ final class StorageService {
     @discardableResult
     func deleteFile(_ url: URL) -> FileCleanupResult {
         do {
-            try fileManager.trashItem(at: url, resultingItemURL: nil)
+            try fileManager.removeItem(at: url)
             return .deleted
         } catch {
             return .failed(error.localizedDescription)

@@ -10,7 +10,7 @@ Core product constraints:
 - local transcription only
 - no external dependencies
 - no API keys
-- audio files are deleted after transcription
+- audio files are permanently deleted after transcription
 - output is plain markdown in a user-selected folder
 
 ## Repo layout
@@ -27,7 +27,12 @@ Core product constraints:
 ├── Tests/
 │   └── TokDownTests/
 │       ├── CalendarServiceTests.swift
-│       └── TranscriptFormatterTests.swift
+│       ├── MenuBarCoordinatorTests.swift
+│       ├── MenuBarIconPresentationTests.swift
+│       ├── StorageServiceTests.swift
+│       ├── SystemAudioServiceTests.swift
+│       ├── TranscriptFormatterTests.swift
+│       └── TranscriptionServiceTests.swift
 └── Sources/
     └── TokDown/
         ├── TokDownApp.swift
@@ -52,7 +57,8 @@ Core product constraints:
 ## Important files
 
 - `Sources/TokDown/TokDownApp.swift` — app entry, menu bar scene, settings window
-- `Sources/TokDown/MenuBarCoordinator.swift` — state machine and orchestration
+- `Sources/TokDown/MenuBarCoordinator.swift` — state machine, permission gating, and orchestration
+- `Sources/TokDown/MenuBarViews.swift` — menu bar content and settings UI, including audio source selection
 - `Sources/TokDown/SystemAudioService.swift` — system audio capture via ScreenCaptureKit
 - `Sources/TokDown/RecordingService.swift` — microphone capture fallback
 - `Sources/TokDown/TranscriptionService.swift` — Apple SpeechTranscriber pipeline
@@ -88,7 +94,7 @@ Artifacts:
 
 ## Build, test, and lint commands
 
-There is no lint setup yet, but there is a small XCTest suite covering transcript formatting and calendar service logic.
+There is no lint setup yet, but there is a focused XCTest suite covering transcript formatting, calendar access decisions, coordinator status handling, menu bar icon presentation, storage collision/cleanup behavior, system-audio rollback cleanup, and speech-permission mapping.
 
 Use these checks before submitting changes:
 
@@ -147,10 +153,12 @@ Do not:
 - Target platform: `macOS 26+`
 - Uses `@Observable` (Observation framework) — not `ObservableObject`/`@Published`. Views use `@State`/`@Environment`, not `@StateObject`/`@EnvironmentObject`.
 - The app uses Apple’s newer on-device SpeechTranscriber pipeline.
+- Speech recognition permission is requested before recording starts because the product promise is transcript-first, not raw-audio capture.
 - ScreenCaptureKit still requires a minimal video config even for audio-only capture.
 - Audio capture uses `Mutex` (Synchronization framework) for session tracking and a serial `DispatchQueue` to serialize writer access across the capture callback and `finish()`.
 - Menu bar UI uses `MenuBarExtra` with `.menu` style, so layout behavior is constrained.
 - Permission prompts and TCC behavior depend on code signing; the build script signs the app automatically.
+- Upcoming meeting loading requires full calendar read access; `.writeOnly` should be treated as upgrade-required, not as a readable success state.
 
 ## What done means
 
@@ -183,10 +191,10 @@ Manual verification checklist:
 - recording can start and stop
 - transcript markdown is written to the chosen folder
 - selected meetings add calendar front matter to the transcript
-- transcript filenames stay date-first and use a meaningful title instead of a generic `Recording`
-- audio file is deleted after transcription
-- settings window opens and saves changes
-- permission prompts still make sense for the changed workflow
+- transcript filenames stay date-first, use a meaningful title instead of a generic `Recording`, and avoid overwriting same-minute collisions
+- audio file is permanently deleted after transcription instead of being moved to Trash
+- settings window opens, saves changes, and persists the selected audio source
+- permission prompts and denied/upgrade-required status messages still make sense for the changed workflow
 
 ## Transcript format contract
 
