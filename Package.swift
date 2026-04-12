@@ -17,10 +17,7 @@ let package = Package(
                 "Resources/Info.plist",
                 "Resources/TokDown.entitlements",
                 "Resources/TokDownIcon.svg",
-                "Resources/TokDownIcon.png",
-                "Resources/TokDownMenuIdle.svg",
-                "Resources/TokDownMenuRecording.svg",
-                "Resources/TokDownMenuTranscribing.svg"
+                "Resources/TokDownIcon.png"
             ]
         ),
         .testTarget(

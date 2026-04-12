@@ -56,9 +56,6 @@ mkdir -p "${APP_BUNDLE_PATH}/Contents/Resources"
 mkdir -p "${APP_BUNDLE_PATH}/Contents/MacOS"
 cp "$BINARY_PATH" "${APP_BUNDLE_PATH}/Contents/MacOS/${TARGET_NAME}"
 cp "$INFO_PLIST_SOURCE" "${APP_BUNDLE_PATH}/Contents/Info.plist"
-cp "${PROJECT_DIR}/Sources/${TARGET_NAME}/Resources/TokDownMenuIdle.svg" "${APP_BUNDLE_PATH}/Contents/Resources/" || true
-cp "${PROJECT_DIR}/Sources/${TARGET_NAME}/Resources/TokDownMenuRecording.svg" "${APP_BUNDLE_PATH}/Contents/Resources/" || true
-cp "${PROJECT_DIR}/Sources/${TARGET_NAME}/Resources/TokDownMenuTranscribing.svg" "${APP_BUNDLE_PATH}/Contents/Resources/" || true
 
 # Generate .icns from app icon source (prefer PNG, fall back to SVG via qlmanage).
 ICON_PNG="${PROJECT_DIR}/Sources/${TARGET_NAME}/Resources/TokDownIcon.png"

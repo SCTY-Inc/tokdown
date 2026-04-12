@@ -46,10 +46,7 @@ Core product constraints:
             ├── Info.plist
             ├── TokDown.entitlements
             ├── TokDownIcon.png
-            ├── TokDownIcon.svg
-            ├── TokDownMenuIdle.svg
-            ├── TokDownMenuRecording.svg
-            └── TokDownMenuTranscribing.svg
+            └── TokDownIcon.svg
 ```
 
 ## Important files
