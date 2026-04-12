@@ -88,10 +88,17 @@ final class SessionManager {
     private var deferredCapture: OpusCaptureFile?
 
     struct RecentTranscript: Identifiable {
+        enum SyncStatus: Sendable {
+            case localOnly
+            case queued
+            case pushed
+        }
+
         let id = UUID()
         let title: String
+        let filename: String
         let date: Date
-        let pushed: Bool
+        var syncStatus: SyncStatus
         let fileURL: URL?
     }
 
@@ -110,6 +117,10 @@ final class SessionManager {
         self.calendar = calendar
         self.settings = settings
         self.recordingMode = settings.recordingMode
+        self.pushQueue.settings = settings
+        self.pushQueue.onPushSuccess = { [weak self] item in
+            self?.markRecentTranscriptPushed(filename: item.filename)
+        }
     }
 
     func applySettings() {
@@ -146,6 +157,7 @@ final class SessionManager {
             return
         }
 
+        PerformanceTrace.emitEvent("RecordingStart", detail: transcriptionMode.title)
         state = .recording
         recordingStart = Date()
         recordingDuration = 0
@@ -184,6 +196,7 @@ final class SessionManager {
         let title = currentTitle
         let meeting = currentMeeting
 
+        PerformanceTrace.emitEvent("RecordingStop", detail: transcriptionMode.title)
         state = .transcribing
 
         let bgTaskID = UIApplication.shared.beginBackgroundTask(expirationHandler: nil)
@@ -195,7 +208,9 @@ final class SessionManager {
                 }
             }
 
+            let signpost = PerformanceTrace.beginInterval("TranscriptBuild", detail: self.transcriptionMode.title)
             let snapshot = await transcribeStoppedRecording()
+            PerformanceTrace.endInterval("TranscriptBuild", state: signpost, detail: "chars=\(snapshot.fullText.count)")
             DebugLog.write("snapshot fullTextLen=\(snapshot.fullText.count) lines=\(snapshot.lines.count) decoded=\(self.decodedFrameCount) decodeFails=\(self.decodeFailCount)")
 
             var resolvedTitle = title
@@ -224,7 +239,13 @@ final class SessionManager {
             if settings.autoPushEnabled {
                 pushTranscript(doc: doc, startTime: startTime, fileURL: savedURL)
             } else {
-                addRecentTranscript(title: doc.title, date: startTime, pushed: false, fileURL: savedURL)
+                addRecentTranscript(
+                    title: doc.title,
+                    filename: doc.filename,
+                    date: startTime,
+                    syncStatus: .localOnly,
+                    fileURL: savedURL
+                )
                 resetToIdle()
             }
         }
@@ -296,19 +317,27 @@ final class SessionManager {
         deferredCapture?.delete()
         deferredCapture = nil
 
+        let contextTerms = transcriptionContextTerms()
+        transcription.contextualStrings = contextTerms
+        transcription.prewarmLanguageModel()
+
         switch transcriptionMode {
         case .live:
             activateAudioSession()
             opusDecoder = OpusStreamDecoder()
-            if opusDecoder == nil {
+            guard opusDecoder != nil else {
                 lastError = "Opus decoder init failed — audio won't transcribe"
+                deactivateAudioSession()
+                return false
             }
 
-            transcription.contextualStrings = settings.vocabularyHints
             transcription.startTranscription()
 
             if let error = transcription.lastError {
                 lastError = error
+                opusDecoder = nil
+                deactivateAudioSession()
+                return false
             }
             return true
 
@@ -348,19 +377,30 @@ final class SessionManager {
             return .init(fullText: "", lines: [])
         }
         self.deferredCapture = nil
-        defer { try? FileManager.default.removeItem(at: captureURL) }
+        var shouldDeleteCapture = false
+        defer {
+            if shouldDeleteCapture {
+                try? FileManager.default.removeItem(at: captureURL)
+            }
+        }
 
         guard let decoder = OpusStreamDecoder() else {
             lastError = "Opus decoder init failed — audio won't transcribe"
+            preserveDeferredCapture(at: captureURL, reason: lastError ?? "decoder-init")
             return .init(fullText: "", lines: [])
         }
 
-        transcription.contextualStrings = settings.vocabularyHints
-        transcription.startTranscription()
-        if let error = transcription.lastError {
-            lastError = error
+        let renderFile: PCMRenderFile
+        do {
+            renderFile = try PCMRenderFile()
+        } catch {
+            lastError = "Couldn't create audio file for Low Power transcription: \(error.localizedDescription)"
+            preserveDeferredCapture(at: captureURL, reason: lastError ?? "render-file-init")
+            return .init(fullText: "", lines: [])
         }
+        defer { renderFile.delete() }
 
+        let signpost = PerformanceTrace.beginInterval("DeferredTranscriptionRender")
         do {
             try OpusCaptureFile.forEachFrame(at: captureURL) { frame in
                 guard let samples = decoder.decode(opusFrame: frame) else {
@@ -374,13 +414,33 @@ final class SessionManager {
                 if shouldLogDecodedFrame(count: decodedFrameCount) {
                     DebugLog.write("deferred decoded #\(decodedFrameCount) samples=\(samples.count)")
                 }
-                transcription.appendAudio(samples: samples)
+                try renderFile.append(samples: samples)
             }
         } catch {
-            lastError = "Couldn't read Low Power capture: \(error.localizedDescription)"
+            PerformanceTrace.endInterval("DeferredTranscriptionRender", state: signpost, detail: "failed")
+            lastError = "Couldn't render Low Power transcription audio: \(error.localizedDescription)"
+            preserveDeferredCapture(at: captureURL, reason: lastError ?? "render-failed")
+            return .init(fullText: "", lines: [])
+        }
+        PerformanceTrace.endInterval("DeferredTranscriptionRender", state: signpost, detail: "frames=\(decodedFrameCount)")
+
+        let snapshot = await transcription.transcribeFile(at: renderFile.url)
+        if let error = transcription.lastError {
+            lastError = error
         }
 
-        return await transcription.finishTranscription()
+        let trimmedText = snapshot.fullText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let shouldPreserveAudio = lastError != nil || (trimmedText.isEmpty && snapshot.lines.isEmpty)
+        if shouldPreserveAudio {
+            if lastError == nil {
+                lastError = "Low Power transcription produced no text"
+            }
+            preserveDeferredCapture(at: captureURL, reason: lastError ?? "empty-transcript")
+        } else {
+            shouldDeleteCapture = true
+        }
+
+        return snapshot
     }
 
     private func checkCalendarState() {
@@ -400,6 +460,14 @@ final class SessionManager {
         startTime: Date,
         fileURL: URL? = nil
     ) {
+        PerformanceTrace.emitEvent("TranscriptQueuedForPush", detail: doc.filename)
+        addRecentTranscript(
+            title: doc.title,
+            filename: doc.filename,
+            date: startTime,
+            syncStatus: .queued,
+            fileURL: fileURL
+        )
         pushQueue.enqueue(
             filename: doc.filename,
             content: doc.markdown,
@@ -407,13 +475,29 @@ final class SessionManager {
             repo: settings.transcriptRepo,
             basePath: settings.transcriptRepoPath
         )
-        addRecentTranscript(title: doc.title, date: startTime, pushed: true, fileURL: fileURL)
         resetToIdle()
     }
 
-    private func addRecentTranscript(title: String, date: Date, pushed: Bool, fileURL: URL? = nil) {
+    func markRecentTranscriptPushed(filename: String) {
+        guard let index = recentTranscripts.firstIndex(where: { $0.filename == filename }) else { return }
+        recentTranscripts[index].syncStatus = .pushed
+    }
+
+    private func addRecentTranscript(
+        title: String,
+        filename: String,
+        date: Date,
+        syncStatus: RecentTranscript.SyncStatus,
+        fileURL: URL? = nil
+    ) {
         recentTranscripts.insert(
-            RecentTranscript(title: title, date: date, pushed: pushed, fileURL: fileURL),
+            RecentTranscript(
+                title: title,
+                filename: filename,
+                date: date,
+                syncStatus: syncStatus,
+                fileURL: fileURL
+            ),
             at: 0
         )
     }
@@ -463,6 +547,27 @@ final class SessionManager {
         return title.isEmpty ? "Pendant Recording" : title
     }
 
+    private func transcriptionContextTerms() -> [String] {
+        var terms = settings.vocabularyHints
+        if !currentTitle.isEmpty {
+            terms.append(currentTitle)
+        }
+        if let currentMeeting {
+            terms.append(currentMeeting.title)
+            terms.append(currentMeeting.calendarTitle)
+            if let location = currentMeeting.location {
+                terms.append(location)
+            }
+            terms.append(contentsOf: currentMeeting.participantNames)
+        }
+
+        return Array(Set(
+            terms
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        )).sorted()
+    }
+
     // MARK: - Background Audio Session
 
     private func activateAudioSession() {
@@ -477,6 +582,44 @@ final class SessionManager {
 
     private func deactivateAudioSession() {
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    private func preserveDeferredCapture(at url: URL, reason: String) {
+        do {
+            let documentsURL = try FileManager.default.url(
+                for: .documentDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
+            )
+            let recoveryDirectory = documentsURL.appendingPathComponent("TranscriptionRecovery", isDirectory: true)
+            try FileManager.default.createDirectory(at: recoveryDirectory, withIntermediateDirectories: true)
+
+            let originalName = url.deletingPathExtension().lastPathComponent
+            let ext = url.pathExtension
+            var destinationURL = recoveryDirectory.appendingPathComponent(url.lastPathComponent)
+            var suffix = 1
+            while FileManager.default.fileExists(atPath: destinationURL.path) {
+                let uniqueName = "\(originalName)-\(suffix)"
+                destinationURL = recoveryDirectory
+                    .appendingPathComponent(uniqueName)
+                    .appendingPathExtension(ext)
+                suffix += 1
+            }
+
+            guard FileManager.default.fileExists(atPath: url.path) else { return }
+            try FileManager.default.moveItem(at: url, to: destinationURL)
+            DebugLog.write("preserved deferred capture file=\(destinationURL.lastPathComponent) reason=\(reason)")
+
+            let preservedMessage = "Original audio preserved locally in TranscriptionRecovery."
+            if let lastError, !lastError.contains(preservedMessage) {
+                self.lastError = "\(lastError) \(preservedMessage)"
+            } else if self.lastError == nil {
+                self.lastError = preservedMessage
+            }
+        } catch {
+            DebugLog.write("preserve deferred capture failed reason=\(reason) error=\(error.localizedDescription)")
+        }
     }
 
     // MARK: - BLE Disconnect Handling
@@ -535,8 +678,9 @@ final class SessionManager {
 
             loaded.append(RecentTranscript(
                 title: title,
+                filename: file.lastPathComponent,
                 date: date,
-                pushed: false,
+                syncStatus: .localOnly,
                 fileURL: file
             ))
         }

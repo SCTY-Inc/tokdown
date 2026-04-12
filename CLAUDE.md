@@ -17,8 +17,8 @@ xcrun devicectl device process launch --device <UDID> com.amadad.tokdown
 ## Architecture
 BLE RX notifications -> FragmentReassembler -> OpusFrameExtractor ->
 - Live mode: OpusStreamDecoder -> TranscriptionService (chunked SFSpeechRecognizer while recording)
-- Low Power mode: OpusCaptureFile -> stop recording -> OpusStreamDecoder -> TranscriptionService
--> TranscriptFormatter -> GitHubSync
+- Low Power mode: OpusCaptureFile -> stop recording -> OpusStreamDecoder -> PCMRenderFile -> SFSpeechURLRecognitionRequest
+-> TranscriptFormatter -> GitHubSync / PushQueue
 
 States: idle -> recording -> transcribing -> pushing
 
@@ -30,9 +30,13 @@ Key files:
 - `LimitlessProtocol.swift` -- protobuf encode/decode, BLE commands (timeSync, enableDataStream, disableDataStream), FragmentReassembler, OpusFrameExtractor
 - `OpusStreamDecoder.swift` -- libopus wrapper (Opus.Decoder from swift-opus)
 - `OpusCaptureFile.swift` -- temp length-prefixed Opus frame capture for Low Power mode
-- `PendantBLE.swift` -- CoreBluetooth manager, Limitless handshake, reconnect backoff, name-based scan filter
-- `TranscriptionService.swift` -- chunked SFSpeechRecognizer (restarts by audio duration to avoid ~1min degradation)
-- `SessionManager.swift` -- pipeline orchestrator; chooses live vs deferred transcription path
+- `PCMRenderFile.swift` -- renders deferred PCM audio to a local `.caf` file for `SFSpeechURLRecognitionRequest`
+- `SpeechLanguageModelCache.swift` -- builds and caches custom Speech language models from contextual phrases when available
+- `PendantBLE.swift` -- CoreBluetooth manager, retrieve-known reconnect path, filtered scan/service discovery, reconnect backoff
+- `TranscriptionService.swift` -- chunked live transcription + file-based deferred transcription, on-device checks, custom vocabulary prewarm
+- `SessionManager.swift` -- pipeline orchestrator; chooses live vs deferred transcription path and collects contextual vocabulary from meetings
+- `PushQueue.swift` -- offline retry queue with push timing policies (immediate / Wi‑Fi / charging)
+- `MetricsCollector.swift` + `PerformanceTrace.swift` -- MetricKit payload capture and signpost instrumentation
 - `TranscriptFormatter.swift` -- YAML front matter + timestamped markdown
 - `DebugLog.swift` -- writes to Documents/debug.log for on-device diagnostics
 - `project.yml` -- XcodeGen config (source of truth for xcodeproj)
@@ -58,7 +62,8 @@ Same format as TokDown macOS -- transcripts are indistinguishable in the archive
 ## Gotchas
 - Limitless Pendant uses protobuf-wrapped BLE protocol (NOT standard Omi 3-byte header)
 - Must send timeSync before enableDataStream; enableDataStream sent only when recording starts (not on connect) to preserve pendant battery
-- `lowPower` is the default transcription mode; it captures raw Opus frames to a temp `.opusframes` file and transcribes only after recording stops
+- `lowPower` is the default transcription mode; it captures raw Opus frames to a temp `.opusframes` file, renders PCM `.caf`, then transcribes with `SFSpeechURLRecognitionRequest`
+- If deferred transcription fails or times out, preserve the original `.opusframes` file under `Documents/TranscriptionRecovery` instead of deleting the only recoverable audio
 - `live` mode keeps `SFSpeechRecognizer` active during recording and costs noticeably more battery than `lowPower`
 - disableDataStream (realTimeMode=0) sent when recording stops; speculative — verify pendant honors it
 - Incoming audio is protobuf-fragmented; needs reassembly before Opus decode
@@ -68,18 +73,24 @@ Same format as TokDown macOS -- transcripts are indistinguishable in the archive
 - Swift 6 + CoreBluetooth: @MainActor on CBDelegate class doesn't work -- delegate conformance crosses isolation boundary and non-Sendable params ([String: Any]) trigger "sending risks data races". Keep @unchecked Sendable with queue: nil invariant instead
 - Keychain service name: "tokdown"
 - SFSpeechRecognizer.requestAuthorization callback runs on background queue -- must use nonisolated
+- On-device recognition should be gated with `supportsOnDeviceRecognition`; TokDown now fails closed instead of silently allowing off-device recognition
 - `bestTranscription.segments` can be empty even when `formattedString` contains transcript text; fall back to formatted text and filter whitespace-only lines to avoid empty `[00:00]` saves
-- SFSpeechRecognizer silently degrades after ~1 min continuous audio -- chunked recognition restarts every 45s of audio, not wall-clock time
+- Live SFSpeechRecognizer silently degrades after ~1 min continuous audio -- chunked recognition restarts every 45s of audio, not wall-clock time
 - Opus frames nested 4 levels deep in protobuf: outer field 2 -> inner field 6 -> repeated field 3 -> field 4 (raw Opus)
 - Opus TOC byte from pendant is 0xB8 (CELT-only mono 20ms)
 - Uses @Observable (Observation framework), not ObservableObject -- views use @Environment(Type.self) not @EnvironmentObject
 - @Observable + lazy var requires @ObservationIgnored (macro conflicts with lazy's computed property mechanics)
 - BLE opus frames delivered via AsyncStream (not Combine) -- SessionManager consumes with for-await Task
+- Reconnect flow should try `retrieveConnectedPeripherals(withServices:)` and `retrievePeripherals(withIdentifiers:)` before scanning; persisted identifiers help, but unpaired BLE identity can still rotate
 - CB state restoration: willRestoreState may return peripheral in .connecting state (not .connected) -- handle both
 - XcodeGen `info: path:` regenerates the plist -- use INFOPLIST_FILE build setting instead
 - BLE writes to pendant must use .withResponse, not .withoutResponse
 - 1-second delays required between subscribe -> timeSync; additional 1s before enableDataStream auto-fires if recording waiting
 - BLE reconnect during recording: completeHandshake() auto-enables streaming if opusFrameContinuation is active
+- BLE scanning/discovery should stay filtered to the pendant service/characteristics to reduce radio and CPU work
 - BLE reconnect now backs off from 2s up to 30s to reduce idle battery drain when the pendant is unavailable
+- PushQueue can defer GitHub sync until Wi‑Fi or charging; use `Push timing` in Settings for larger archives / better battery
+- PushQueue drains by item ID now; don't overwrite the full queue after awaited network work or you'll lose transcripts enqueued mid-drain
+- MetricKit + signposts are wired for measuring battery regressions instead of guessing
 - Keychain uses kSecAttrAccessibleWhenUnlockedThisDeviceOnly for PAT storage
 - LimitlessCommand.messageIndex uses OSAllocatedUnfairLock for thread-safe atomic access

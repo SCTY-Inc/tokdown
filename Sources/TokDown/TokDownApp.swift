@@ -27,6 +27,7 @@ final class AppState {
     let ble = PendantBLE()
     let calendar = CalendarService()
     let transcription = TranscriptionService()
+    let metrics = MetricsCollector()
     let settings = SettingsStore()
     @ObservationIgnored lazy var session: SessionManager = SessionManager(
         ble: ble,
@@ -39,6 +40,7 @@ final class AppState {
         ble.startScanning()
 
         let speechAuthorized = await transcription.requestAuthorization()
+        transcription.refreshRecognitionSupport()
         let calendarAuthorized = await calendar.requestAccess()
 
         var errors: [String] = []
@@ -52,5 +54,6 @@ final class AppState {
         session.lastError = errors.isEmpty ? nil : errors.joined(separator: " • ")
         session.applySettings()
         session.loadRecentTranscripts()
+        session.pushQueue.drain()
     }
 }

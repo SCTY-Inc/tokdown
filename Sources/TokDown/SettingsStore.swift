@@ -5,6 +5,35 @@ import Observation
 @MainActor @Observable
 final class SettingsStore {
 
+    enum PushMode: String, CaseIterable, Sendable {
+        case immediate
+        case wifiOnly
+        case chargingOnly
+        case wifiOrCharging
+
+        var title: String {
+            switch self {
+            case .immediate: "Immediate"
+            case .wifiOnly: "Wi‑Fi Only"
+            case .chargingOnly: "Charging Only"
+            case .wifiOrCharging: "Wi‑Fi or Charging"
+            }
+        }
+
+        var summary: String {
+            switch self {
+            case .immediate:
+                "Push as soon as the transcript is ready."
+            case .wifiOnly:
+                "Wait for Wi‑Fi before pushing queued transcripts."
+            case .chargingOnly:
+                "Wait until the phone is charging before pushing."
+            case .wifiOrCharging:
+                "Push when on Wi‑Fi or while charging."
+            }
+        }
+    }
+
     private let defaults = UserDefaults.standard
 
     /// Whether GitHub PAT has been configured (actual token is in Keychain)
@@ -25,6 +54,11 @@ final class SettingsStore {
     /// How transcription should run for new recordings.
     var transcriptionMode: SessionManager.TranscriptionMode {
         didSet { defaults.set(transcriptionMode.rawValue, forKey: "transcriptionMode") }
+    }
+
+    /// When queued transcripts are allowed to push to GitHub.
+    var pushMode: PushMode {
+        didSet { defaults.set(pushMode.rawValue, forKey: "pushMode") }
     }
 
     /// Target GitHub repo (owner/name)
@@ -56,5 +90,8 @@ final class SettingsStore {
 
         let transcriptionModeRaw = defaults.string(forKey: "transcriptionMode") ?? SessionManager.TranscriptionMode.lowPower.rawValue
         self.transcriptionMode = SessionManager.TranscriptionMode(rawValue: transcriptionModeRaw) ?? .lowPower
+
+        let pushModeRaw = defaults.string(forKey: "pushMode") ?? PushMode.immediate.rawValue
+        self.pushMode = PushMode(rawValue: pushModeRaw) ?? .immediate
     }
 }

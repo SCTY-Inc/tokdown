@@ -38,7 +38,8 @@ struct TranscriptFormatterTests {
             startDate: fixedStart,
             endDate: fixedEnd,
             calendarTitle: calendarTitle,
-            location: location
+            location: location,
+            participantNames: []
         )
     }
 

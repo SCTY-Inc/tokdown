@@ -31,6 +31,9 @@ actor GitHubSync {
         repo: String,
         basePath: String
     ) async throws {
+        let signpost = PerformanceTrace.beginInterval("GitHubPush", detail: filename)
+        defer { PerformanceTrace.endInterval("GitHubPush", state: signpost, detail: filename) }
+
         guard !repo.isEmpty else {
             throw SyncError.missingRepo
         }
@@ -70,6 +73,8 @@ actor GitHubSync {
         do {
             (data, response) = try await URLSession.shared.data(for: request)
         } catch {
+            PerformanceTrace.emitEvent("GitHubPushFailure", detail: filename)
+            DebugLog.write("GitHub push network error file=\(filename) error=\(error.localizedDescription)")
             throw SyncError.networkError(error)
         }
 
@@ -79,8 +84,12 @@ actor GitHubSync {
 
         guard (200...299).contains(httpResponse.statusCode) else {
             let message = String(data: data, encoding: .utf8) ?? "Unknown error"
+            DebugLog.write("GitHub push HTTP error file=\(filename) status=\(httpResponse.statusCode)")
             throw SyncError.httpError(statusCode: httpResponse.statusCode, message: message)
         }
+
+        PerformanceTrace.emitEvent("GitHubPushSuccess", detail: filename)
+        DebugLog.write("GitHub push success file=\(filename)")
     }
 
     /// Check if a transcript already exists on GitHub.

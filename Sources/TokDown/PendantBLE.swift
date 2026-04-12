@@ -25,6 +25,13 @@ final class PendantBLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
     private static let batteryServiceUUID  = "180F"
     private static let batteryLevelUUID    = "2A19"
     private static let restoreIdentifier   = "com.tokdown.ble-central"
+    private static let knownPeripheralIDKey = "knownPendantPeripheralIdentifier"
+
+    private static let serviceUUID = CBUUID(string: serviceUUIDString)
+    private static let txCharUUID = CBUUID(string: txCharUUIDString)
+    private static let rxCharUUID = CBUUID(string: rxCharUUIDString)
+    private static let batteryServiceCBUUID = CBUUID(string: batteryServiceUUID)
+    private static let batteryLevelCBUUID = CBUUID(string: batteryLevelUUID)
 
     /// Known pendant name prefixes
     private static let knownPrefixes = ["Pendant", "Friend", "Omi", "Limitless", "OpenGlass"]
@@ -47,6 +54,8 @@ final class PendantBLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
     var onConnectionStateChanged: ((ConnectionState) -> Void)?
 
     private var opusFrameContinuation: AsyncStream<Data>.Continuation?
+
+    private let defaults = UserDefaults.standard
 
     private var centralManager: CBCentralManager?
     private var peripheral: CBPeripheral?
@@ -123,10 +132,45 @@ final class PendantBLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         isStreaming = false
     }
 
+    private var knownPeripheralIdentifier: UUID? {
+        get {
+            defaults.string(forKey: Self.knownPeripheralIDKey).flatMap(UUID.init(uuidString:))
+        }
+        set {
+            defaults.set(newValue?.uuidString, forKey: Self.knownPeripheralIDKey)
+        }
+    }
+
+    private func attemptReconnectOrScan(using centralManager: CBCentralManager) {
+        if let connected = centralManager.retrieveConnectedPeripherals(withServices: [Self.serviceUUID]).first {
+            centralManager.stopScan()
+            peripheral = connected
+            connected.delegate = self
+            peripheralName = connected.name
+            connectionState = .connecting
+            centralManager.connect(connected, options: nil)
+            return
+        }
+
+        if let knownPeripheralIdentifier,
+           let known = centralManager.retrievePeripherals(withIdentifiers: [knownPeripheralIdentifier]).first {
+            centralManager.stopScan()
+            peripheral = known
+            known.delegate = self
+            peripheralName = known.name
+            connectionState = .connecting
+            centralManager.connect(known, options: nil)
+            return
+        }
+
+        beginScan(using: centralManager)
+    }
+
     private func beginScan(using centralManager: CBCentralManager) {
         connectionState = .scanning
+        PerformanceTrace.emitEvent("BLEScanStart")
         centralManager.scanForPeripherals(
-            withServices: nil,
+            withServices: [Self.serviceUUID],
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
         )
     }
@@ -194,11 +238,11 @@ final class PendantBLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         case .poweredOn:
             if needsServiceDiscovery, let peripheral, peripheral.state == .connected {
                 needsServiceDiscovery = false
-                peripheral.discoverServices(nil)
+                peripheral.discoverServices([Self.serviceUUID, Self.batteryServiceCBUUID])
             } else if let p = self.peripheral, p.state == .connecting {
                 // Restored peripheral still connecting — wait for didConnect
             } else {
-                beginScan(using: central)
+                attemptReconnectOrScan(using: central)
             }
         case .poweredOff, .unauthorized, .unsupported:
             connectionState = .disconnected
@@ -237,20 +281,24 @@ final class PendantBLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
             return
         }
 
+        PerformanceTrace.emitEvent("BLEDiscover", detail: name)
         central.stopScan()
         self.peripheral = peripheral
         peripheral.delegate = self
         peripheralName = name
+        knownPeripheralIdentifier = peripheral.identifier
         connectionState = .connecting
         central.connect(peripheral, options: nil)
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         reconnectDelay = 2
+        PerformanceTrace.emitEvent("BLEConnect", detail: peripheral.name ?? peripheral.identifier.uuidString)
+        knownPeripheralIdentifier = peripheral.identifier
         peripheral.delegate = self
         connectionState = .connected
         peripheralName = peripheral.name
-        peripheral.discoverServices(nil)
+        peripheral.discoverServices([Self.serviceUUID, Self.batteryServiceCBUUID])
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
@@ -259,6 +307,7 @@ final class PendantBLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        PerformanceTrace.emitEvent("BLEDisconnect", detail: peripheral.name ?? peripheral.identifier.uuidString)
         resetPeripheralState()
         connectionState = .disconnected
         scheduleReconnect()
@@ -269,7 +318,14 @@ final class PendantBLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard let services = peripheral.services else { return }
         for service in services {
-            peripheral.discoverCharacteristics(nil, for: service)
+            switch service.uuid {
+            case Self.serviceUUID:
+                peripheral.discoverCharacteristics([Self.txCharUUID, Self.rxCharUUID], for: service)
+            case Self.batteryServiceCBUUID:
+                peripheral.discoverCharacteristics([Self.batteryLevelCBUUID], for: service)
+            default:
+                continue
+            }
         }
     }
 

@@ -1,5 +1,25 @@
 # Solutions Log
 
+## 2026-04-11: PushQueue dropped new transcripts enqueued during an in-flight drain
+**Problem**: If TokDown queued another transcript while a GitHub push was already awaiting the network, the later item could disappear from the queue.
+**Root cause**: `PushQueue.drain()` iterated a snapshot of `queue`, awaited per-item network work, then replaced the entire queue with a `remaining` array. Items appended mid-drain were never in that snapshot and got overwritten.
+**Fix**: Drain now processes the initial IDs individually, removes/retries each item by ID, preserves any newly appended items, and schedules another drain pass if work remains. Added a regression test covering enqueue-during-drain.
+
+## 2026-04-11: Low Power transcription failure deleted the only recoverable audio
+**Problem**: When deferred transcription failed or timed out, TokDown could still save an empty markdown transcript after deleting the original captured audio.
+**Root cause**: `SessionManager` always removed the finalized `.opusframes` capture via `defer`, even if decode/render/speech recognition later failed.
+**Fix**: Low Power now deletes the original capture only after successful transcription. On failures or empty deferred results, TokDown preserves the raw capture in `Documents/TranscriptionRecovery`, surfaces that in `lastError`, and adds a timeout to file-based speech recognition so the app doesn't hang in `.transcribing` forever.
+
+## 2026-04-11: Apple-native low-power transcription needed a file-based path, not replaying live buffers
+**Problem**: `lowPower` reduced battery drain while recording, but still depended on the live-buffer transcription path at stop, which kept more custom timing/finish logic than necessary.
+**Root cause**: Deferred mode decoded Opus back into the chunked live `SFSpeechAudioBufferRecognitionRequest` path instead of using Apple's prerecorded-audio API.
+**Fix**: Added `PCMRenderFile` and switched deferred transcription to `SFSpeechURLRecognitionRequest`. TokDown now captures raw Opus frames, renders a local `.caf`, then transcribes the file with `taskHint = .dictation`, `requiresOnDeviceRecognition = true`, contextual phrases, and custom language model prewarm when available.
+
+## 2026-04-11: BLE reconnect and scan path still used more radio than necessary
+**Problem**: Even after adding reconnect backoff, TokDown still scanned broadly (`withServices: nil`) and rediscovered every service/characteristic, which cost unnecessary radio and CPU work.
+**Root cause**: The central path skipped Apple's retrieve-known workflow and service filtering guidance.
+**Fix**: `PendantBLE` now tries `retrieveConnectedPeripherals(withServices:)` and `retrievePeripherals(withIdentifiers:)` before scanning, persists the last pendant identifier, scans only for the pendant service UUID, and discovers only the TX/RX/battery characteristics it actually uses.
+
 ## 2026-04-11: Saved transcript collapsed to empty `[00:00]` block despite live text on screen
 **Problem**: TokDown showed a reasonable live transcript during recording, but the saved markdown sometimes contained only `[00:00]` or blank content.
 **Root cause**: `SFSpeechRecognizer` can produce a final result where `bestTranscription.segments` is empty or whitespace-only even though `formattedString` still contains useful text. The save path trusted the segment list too aggressively, so the formatter emitted an empty timestamp row.

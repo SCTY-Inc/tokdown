@@ -40,6 +40,18 @@ struct SettingsView: View {
 
                 Toggle("Auto-push after recording", isOn: $session.settings.autoPushEnabled)
 
+                if session.settings.autoPushEnabled {
+                    Picker("Push timing", selection: $session.settings.pushMode) {
+                        ForEach(SettingsStore.PushMode.allCases, id: \.self) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+
+                    Text(session.settings.pushMode.summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Text("When auto-push is off, transcripts are still saved locally in the app's Documents/Transcripts folder.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -107,6 +119,11 @@ struct SettingsView: View {
                     Text(ble.isStreaming ? "Active" : "Inactive")
                         .foregroundStyle(ble.isStreaming ? .green : .secondary)
                 }
+
+                LabeledContent("On-device Speech") {
+                    Text(session.transcription.supportsOnDeviceRecognition ? "Available" : "Unavailable")
+                        .foregroundStyle(session.transcription.supportsOnDeviceRecognition ? .green : .secondary)
+                }
             }
 
             Section("About") {
@@ -124,6 +141,9 @@ struct SettingsView: View {
         }
         .onChange(of: session.settings.recordingMode) { _, newValue in
             session.setRecordingMode(newValue)
+        }
+        .onChange(of: session.settings.pushMode) { _, _ in
+            session.pushQueue.drain()
         }
     }
 

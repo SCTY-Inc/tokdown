@@ -15,6 +15,7 @@ final class CalendarService {
         let endDate: Date
         let calendarTitle: String
         let location: String?
+        let participantNames: [String]
     }
 
     var upcomingMeetings: [Meeting] = []
@@ -66,7 +67,10 @@ final class CalendarService {
                     startDate: event.startDate,
                     endDate: event.endDate,
                     calendarTitle: event.calendar?.title ?? "",
-                    location: event.location
+                    location: event.location,
+                    participantNames: event.attendees?
+                        .compactMap { $0.name?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                        .filter { !$0.isEmpty } ?? []
                 )
             }
     }

@@ -1,6 +1,7 @@
 import Foundation
 import Network
 import Observation
+import UIKit
 
 /// Queues GitHub pushes with retry and offline support.
 /// Persists queue to Documents/push-queue.json. Drains on launch and connectivity change.
@@ -20,22 +21,48 @@ final class PushQueue {
 
     private(set) var pendingCount = 0
 
+    var settings: SettingsStore?
+    var onPushSuccess: ((PendingPush) -> Void)?
+
     private var queue: [PendingPush] = []
-    let github = GitHubSync()
+    private let github: GitHubSync
     private let monitor = NWPathMonitor()
+    private let queueURLOverride: URL?
+    private let canDrainNowOverride: Bool?
+    private let pushOperation: (@Sendable (PendingPush) async throws -> Void)?
+    private var currentPath: NWPath?
     private var isDraining = false
+    private var batteryObserver: NSObjectProtocol?
 
     private var queueURL: URL? {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+        queueURLOverride ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
             .appendingPathComponent("push-queue.json")
     }
 
-    init() {
+    init(
+        github: GitHubSync = GitHubSync(),
+        queueURLOverride: URL? = nil,
+        shouldStartMonitoring: Bool = true,
+        shouldStartBatteryMonitoring: Bool = true,
+        canDrainNowOverride: Bool? = nil,
+        pushOperation: (@Sendable (PendingPush) async throws -> Void)? = nil
+    ) {
+        self.github = github
+        self.queueURLOverride = queueURLOverride
+        self.canDrainNowOverride = canDrainNowOverride
+        self.pushOperation = pushOperation
+
         loadQueue()
-        startMonitoring()
+        if shouldStartMonitoring {
+            self.startMonitoring()
+        }
+        if shouldStartBatteryMonitoring {
+            UIDevice.current.isBatteryMonitoringEnabled = true
+            self.startBatteryMonitoring()
+        }
     }
 
-    /// Add a transcript to the push queue and attempt immediate push.
+    /// Add a transcript to the push queue and attempt a push when conditions allow.
     func enqueue(filename: String, content: String, commitMessage: String, repo: String, basePath: String) {
         let item = PendingPush(
             id: UUID(),
@@ -49,39 +76,59 @@ final class PushQueue {
         queue.append(item)
         pendingCount = queue.count
         saveQueue()
+        PerformanceTrace.emitEvent("PushQueueEnqueue", detail: "count=\(queue.count)")
         drain()
     }
 
     /// Attempt to push all queued items.
     func drain() {
         guard !isDraining, !queue.isEmpty else { return }
+        guard canDrainNow else {
+            PerformanceTrace.emitEvent("PushQueueDeferred", detail: deferredReason)
+            return
+        }
         isDraining = true
+        let signpost = PerformanceTrace.beginInterval("PushQueueDrain", detail: "count=\(queue.count)")
 
-        Task { @MainActor in
-            var remaining: [PendingPush] = []
+        Task { @MainActor [weak self] in
+            guard let self else { return }
 
-            for item in queue {
+            defer {
+                self.pendingCount = self.queue.count
+                self.saveQueue()
+                self.isDraining = false
+                PerformanceTrace.endInterval("PushQueueDrain", state: signpost, detail: "remaining=\(self.queue.count)")
+
+                if !self.queue.isEmpty, self.canDrainNow {
+                    self.drain()
+                }
+            }
+
+            let initialIDs = self.queue.map(\.id)
+            var retries: [PendingPush] = []
+
+            for id in initialIDs {
+                guard self.canDrainNow else {
+                    PerformanceTrace.emitEvent("PushQueueDeferred", detail: self.deferredReason)
+                    break
+                }
+                guard let item = self.queue.first(where: { $0.id == id }) else { continue }
+
                 do {
-                    try await github.push(
-                        filename: item.filename,
-                        content: item.content,
-                        commitMessage: item.commitMessage,
-                        repo: item.repo,
-                        basePath: item.basePath
-                    )
+                    try await self.performPush(for: item)
+                    self.removePendingPush(id: id)
+                    self.onPushSuccess?(item)
                 } catch {
+                    self.removePendingPush(id: id)
                     var retry = item
                     retry.retryCount += 1
-                    if retry.retryCount < 10 { // max 10 retries
-                        remaining.append(retry)
+                    if retry.retryCount < 10 {
+                        retries.append(retry)
                     }
                 }
             }
 
-            queue = remaining
-            pendingCount = queue.count
-            saveQueue()
-            isDraining = false
+            self.queue.append(contentsOf: retries)
         }
     }
 
@@ -104,14 +151,91 @@ final class PushQueue {
 
     // MARK: - Network Monitoring
 
+    private var canDrainNow: Bool {
+        if let canDrainNowOverride {
+            return canDrainNowOverride
+        }
+
+        guard let currentPath, currentPath.status == .satisfied else { return false }
+        let isCharging = UIDevice.current.batteryState == .charging || UIDevice.current.batteryState == .full
+        let isWiFi = currentPath.usesInterfaceType(.wifi) && !currentPath.isExpensive
+        let mode = settings?.pushMode ?? .immediate
+
+        switch mode {
+        case .immediate:
+            return true
+        case .wifiOnly:
+            return isWiFi
+        case .chargingOnly:
+            return isCharging
+        case .wifiOrCharging:
+            return isWiFi || isCharging
+        }
+    }
+
+    private var deferredReason: String {
+        if let canDrainNowOverride {
+            return canDrainNowOverride ? "ready" : "blocked-by-override"
+        }
+
+        guard let currentPath, currentPath.status == .satisfied else {
+            return "waiting-for-network"
+        }
+        let isCharging = UIDevice.current.batteryState == .charging || UIDevice.current.batteryState == .full
+        let isWiFi = currentPath.usesInterfaceType(.wifi) && !currentPath.isExpensive
+        switch settings?.pushMode ?? .immediate {
+        case .immediate:
+            return "ready"
+        case .wifiOnly:
+            return isWiFi ? "ready" : "waiting-for-wifi"
+        case .chargingOnly:
+            return isCharging ? "ready" : "waiting-for-charging"
+        case .wifiOrCharging:
+            return (isWiFi || isCharging) ? "ready" : "waiting-for-wifi-or-charging"
+        }
+    }
+
     private func startMonitoring() {
         monitor.pathUpdateHandler = { [weak self] path in
-            if path.status == .satisfied {
-                Task { @MainActor [weak self] in
+            Task { @MainActor [weak self] in
+                self?.currentPath = path
+                if path.status == .satisfied {
                     self?.drain()
                 }
             }
         }
         monitor.start(queue: DispatchQueue(label: "com.tokdown.network-monitor"))
+    }
+
+    private func startBatteryMonitoring() {
+        batteryObserver = NotificationCenter.default.addObserver(
+            forName: UIDevice.batteryStateDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.drain()
+            }
+        }
+    }
+
+    private func performPush(for item: PendingPush) async throws {
+        if let pushOperation {
+            try await pushOperation(item)
+            return
+        }
+
+        try await github.push(
+            filename: item.filename,
+            content: item.content,
+            commitMessage: item.commitMessage,
+            repo: item.repo,
+            basePath: item.basePath
+        )
+    }
+
+    private func removePendingPush(id: UUID) {
+        guard let index = queue.firstIndex(where: { $0.id == id }) else { return }
+        queue.remove(at: index)
     }
 }

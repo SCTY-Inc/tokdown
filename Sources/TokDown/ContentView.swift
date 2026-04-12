@@ -321,11 +321,9 @@ struct ContentView: View {
 
     private func recentTranscriptRow(_ transcript: SessionManager.RecentTranscript) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: transcript.pushed
-                  ? "checkmark.circle.fill"
-                  : "checkmark.circle")
+            Image(systemName: transcriptStatusIcon(transcript))
                 .font(.system(size: 14))
-                .foregroundStyle(transcript.pushed ? .green : .secondary)
+                .foregroundStyle(transcriptStatusColor(transcript))
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(transcript.title)
@@ -344,6 +342,28 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 14)
+    }
+
+    private func transcriptStatusIcon(_ transcript: SessionManager.RecentTranscript) -> String {
+        switch transcript.syncStatus {
+        case .localOnly:
+            "checkmark.circle"
+        case .queued:
+            "clock"
+        case .pushed:
+            "checkmark.circle.fill"
+        }
+    }
+
+    private func transcriptStatusColor(_ transcript: SessionManager.RecentTranscript) -> Color {
+        switch transcript.syncStatus {
+        case .localOnly:
+            .secondary
+        case .queued:
+            .orange
+        case .pushed:
+            .green
+        }
     }
 
     // MARK: - Error Banner
@@ -463,6 +483,9 @@ struct TranscriptDetailView: View {
                     repo: session.settings.transcriptRepo,
                     basePath: session.settings.transcriptRepoPath
                 )
+                await MainActor.run {
+                    session.markRecentTranscriptPushed(filename: filename)
+                }
                 showStatus("Pushed")
             } catch {
                 showStatus("Push failed: \(error.localizedDescription)")

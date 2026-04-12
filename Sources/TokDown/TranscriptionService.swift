@@ -7,8 +7,8 @@ import Observation
 ///
 /// Uses chunked recognition to handle recordings of any length.
 /// SFSpeechRecognizer silently degrades after ~1 minute of continuous audio,
-/// so we restart the recognition task every `chunkDuration` seconds with
-/// audio overlap to avoid gaps at boundaries.
+/// so we restart the recognition task every `chunkDuration` seconds of audio
+/// with overlap to avoid gaps at boundaries.
 @MainActor @Observable
 final class TranscriptionService {
 
@@ -25,6 +25,8 @@ final class TranscriptionService {
     var isTranscribing = false
     var fullText: String = ""
     var lastError: String?
+    var isRecognizerAvailable = true
+    var supportsOnDeviceRecognition = false
 
     /// Accumulated lines across all chunks, with absolute timestamps.
     private(set) var lines: [TranscriptLine] = []
@@ -33,7 +35,14 @@ final class TranscriptionService {
     private let chunkDuration: TimeInterval = 45
 
     /// Vocabulary hints for improved recognition (names, jargon, products).
-    var contextualStrings: [String] = []
+    var contextualStrings: [String] = [] {
+        didSet {
+            preparedLanguageModelConfiguration = nil
+        }
+    }
+
+    private let languageModelCache = SpeechLanguageModelCache()
+    private var preparedLanguageModelConfiguration: SFSpeechLanguageModel.Configuration?
 
     private var recognizer: SFSpeechRecognizer?
     private var audioFormat: AVAudioFormat?
@@ -79,17 +88,29 @@ final class TranscriptionService {
         }
     }
 
+    // MARK: - Preparation
+
+    func prewarmLanguageModel(locale: Locale = .current) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            preparedLanguageModelConfiguration = await languageModelCache.configuration(
+                for: contextualStrings,
+                locale: locale
+            )
+        }
+    }
+
+    func refreshRecognitionSupport(locale: Locale = .current) {
+        let recognizer = SFSpeechRecognizer(locale: locale)
+        isRecognizerAvailable = recognizer?.isAvailable ?? false
+        supportsOnDeviceRecognition = recognizer?.supportsOnDeviceRecognition ?? false
+    }
+
     // MARK: - Start / Stop
 
-    func startTranscription(sampleRate: Double = 16000) {
+    func startTranscription(sampleRate: Double = 16000, locale: Locale = .current) {
         guard !isTranscribing else { return }
-
-        recognizer = SFSpeechRecognizer(locale: Locale.current)
-        guard let recognizer, recognizer.isAvailable else {
-            lastError = "Speech recognition unavailable for \(Locale.current.identifier)"
-            return
-        }
-        lastError = nil
+        guard configureRecognizer(locale: locale, requireOnDevice: true) else { return }
 
         self.sampleRate = sampleRate
         audioFormat = AVAudioFormat(
@@ -166,6 +187,70 @@ final class TranscriptionService {
         }
     }
 
+    func transcribeFile(at url: URL, locale: Locale = .current) async -> Snapshot {
+        teardown()
+        guard configureRecognizer(locale: locale, requireOnDevice: true) else {
+            return Snapshot(fullText: "", lines: [])
+        }
+
+        let request = SFSpeechURLRecognitionRequest(url: url)
+        guard let recognizer else {
+            return Snapshot(fullText: "", lines: [])
+        }
+
+        let customLanguageModel = await customLanguageModelConfiguration(locale: locale)
+        configureRequest(request, shouldReportPartialResults: false, customLanguageModel: customLanguageModel)
+
+        isTranscribing = true
+        let signpost = PerformanceTrace.beginInterval("SpeechFileRecognition", detail: url.lastPathComponent)
+
+        var didResume = false
+        var timeoutTask: Task<Void, Never>?
+        let finalSnapshot: Snapshot = await withCheckedContinuation { (continuation: CheckedContinuation<Snapshot, Never>) in
+            func resumeOnce(_ snapshot: Snapshot) {
+                guard !didResume else { return }
+                didResume = true
+                timeoutTask?.cancel()
+                continuation.resume(returning: snapshot)
+            }
+
+            timeoutTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(20))
+                guard let self, !didResume else { return }
+                self.lastError = "Speech recognition timed out for prerecorded audio"
+                self.recognitionTask?.cancel()
+                resumeOnce(self.snapshotWithFallback())
+            }
+
+            recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
+                Task { @MainActor [weak self] in
+                    guard let self, !didResume else { return }
+
+                    if let result {
+                        let resultSnapshot = self.snapshot(from: result, chunkOffset: 0)
+                        if result.isFinal {
+                            self.lastError = nil
+                            resumeOnce(resultSnapshot)
+                        }
+                        return
+                    }
+
+                    if let error {
+                        self.lastError = error.localizedDescription
+                        resumeOnce(self.snapshotWithFallback())
+                    }
+                }
+            }
+        }
+
+        timeoutTask?.cancel()
+
+        PerformanceTrace.endInterval("SpeechFileRecognition", state: signpost, detail: "chars=\(finalSnapshot.fullText.count)")
+        DebugLog.write("file transcription fullTextLen=\(finalSnapshot.fullText.count) lines=\(finalSnapshot.lines.count)")
+        teardown()
+        return finalSnapshot
+    }
+
     // MARK: - Chunked Recognition
 
     private func startChunk() {
@@ -186,15 +271,25 @@ final class TranscriptionService {
 
     private func makeRequest() -> SFSpeechAudioBufferRecognitionRequest {
         let request = SFSpeechAudioBufferRecognitionRequest()
-        request.shouldReportPartialResults = true
+        configureRequest(request, shouldReportPartialResults: true, customLanguageModel: preparedLanguageModelConfiguration)
+        return request
+    }
+
+    private func configureRequest(
+        _ request: SFSpeechRecognitionRequest,
+        shouldReportPartialResults: Bool,
+        customLanguageModel: SFSpeechLanguageModel.Configuration?
+    ) {
+        request.shouldReportPartialResults = shouldReportPartialResults
         request.requiresOnDeviceRecognition = true
+        request.taskHint = .dictation
         if #available(iOS 17, *) {
             request.addsPunctuation = true
+            request.customizedLanguageModel = customLanguageModel
         }
         if !contextualStrings.isEmpty {
             request.contextualStrings = contextualStrings
         }
-        return request
     }
 
     /// Finalize current chunk and start a new one with seamless transition.
@@ -237,42 +332,25 @@ final class TranscriptionService {
         chunkOffset: TimeInterval
     ) {
         if let result {
-            let formattedText = result.bestTranscription.formattedString
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let segmentLines = result.bestTranscription.segments.compactMap { segment -> TranscriptLine? in
-                let text = segment.substring.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !text.isEmpty else { return nil }
-                return TranscriptLine(
-                    timestamp: chunkOffset + segment.timestamp,
-                    text: text
-                )
-            }
-            let resolvedChunkLines: [TranscriptLine]
-            if !segmentLines.isEmpty {
-                resolvedChunkLines = segmentLines
-            } else if !formattedText.isEmpty {
-                resolvedChunkLines = [TranscriptLine(timestamp: chunkOffset, text: formattedText)]
-            } else {
-                resolvedChunkLines = []
-            }
+            let snapshot = snapshot(from: result, chunkOffset: chunkOffset)
 
             speechResultLogCount += 1
             if speechResultLogCount <= 3 || result.isFinal {
                 DebugLog.write(
-                    "speech result #\(speechResultLogCount) final=\(result.isFinal) segments=\(result.bestTranscription.segments.count) nonEmpty=\(resolvedChunkLines.count) formattedLen=\(formattedText.count)"
+                    "speech result #\(speechResultLogCount) final=\(result.isFinal) segments=\(result.bestTranscription.segments.count) lines=\(snapshot.lines.count) formattedLen=\(snapshot.fullText.count)"
                 )
             }
 
             let hasExistingTranscript = !(committedLines.isEmpty && currentChunkLines.isEmpty)
-            if resolvedChunkLines.isEmpty, hasExistingTranscript {
+            if snapshot.lines.isEmpty, hasExistingTranscript {
                 if result.isFinal, finishContinuation != nil {
                     completeIfNeeded()
                 }
                 return
             }
 
-            currentChunkLines = resolvedChunkLines
-            updateMergedTranscript(formattedFallback: formattedText)
+            currentChunkLines = snapshot.lines
+            updateMergedTranscript(formattedFallback: snapshot.fullText)
 
             if result.isFinal, finishContinuation != nil {
                 completeIfNeeded()
@@ -283,6 +361,42 @@ final class TranscriptionService {
         if error != nil, finishContinuation != nil {
             completeIfNeeded()
         }
+    }
+
+    private func snapshot(from result: SFSpeechRecognitionResult, chunkOffset: TimeInterval) -> Snapshot {
+        let formattedText = result.bestTranscription.formattedString
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let segmentLines = result.bestTranscription.segments.compactMap { segment -> TranscriptLine? in
+            let text = segment.substring.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            return TranscriptLine(
+                timestamp: chunkOffset + segment.timestamp,
+                text: text
+            )
+        }
+        let lines: [TranscriptLine]
+        if !segmentLines.isEmpty {
+            lines = segmentLines
+        } else if !formattedText.isEmpty {
+            lines = [TranscriptLine(timestamp: chunkOffset, text: formattedText)]
+        } else {
+            lines = []
+        }
+
+        let sanitizedLines = sanitizeTranscriptLines(lines)
+        let combinedText = sanitizedLines.map(\.text).joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let snapshot = Snapshot(
+            fullText: combinedText.isEmpty ? formattedText : combinedText,
+            lines: sanitizedLines
+        )
+
+        if !snapshot.fullText.isEmpty || !snapshot.lines.isEmpty {
+            lastNonEmptySnapshot = snapshot
+        }
+
+        return snapshot
     }
 
     // MARK: - Buffer Management
@@ -361,6 +475,12 @@ final class TranscriptionService {
         isTranscribing = false
         sampleBuffer = []
         overlapBuffer = []
+        lines = []
+        committedLines = []
+        currentChunkLines = []
+        chunkStartOffset = 0
+        currentChunkSampleCount = 0
+        isRecognizerAvailable = true
     }
 
     private var chunkSampleLimit: Int {
@@ -410,6 +530,40 @@ final class TranscriptionService {
 
     private func snapshot() -> Snapshot {
         Snapshot(fullText: fullText, lines: lines)
+    }
+
+    private func configureRecognizer(locale: Locale, requireOnDevice: Bool) -> Bool {
+        recognizer = SFSpeechRecognizer(locale: locale)
+        guard let recognizer else {
+            lastError = "Speech recognition unavailable for \(locale.identifier)"
+            return false
+        }
+
+        isRecognizerAvailable = recognizer.isAvailable
+        supportsOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
+
+        guard recognizer.isAvailable else {
+            lastError = "Speech recognition unavailable for \(locale.identifier)"
+            return false
+        }
+
+        if requireOnDevice, !recognizer.supportsOnDeviceRecognition {
+            lastError = "On-device speech recognition unavailable for \(locale.identifier)"
+            return false
+        }
+
+        lastError = nil
+        return true
+    }
+
+    private func customLanguageModelConfiguration(locale: Locale) async -> SFSpeechLanguageModel.Configuration? {
+        guard #available(iOS 17, *) else { return nil }
+        if let preparedLanguageModelConfiguration {
+            return preparedLanguageModelConfiguration
+        }
+        let configuration = await languageModelCache.configuration(for: contextualStrings, locale: locale)
+        preparedLanguageModelConfiguration = configuration
+        return configuration
     }
 
     // MARK: - Chunk Boundary Deduplication

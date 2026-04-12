@@ -17,15 +17,19 @@
 		42B170C0B6BB58EC462BC965 /* DebugLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7560B8DC76C9C549D5218615 /* DebugLog.swift */; };
 		453CAA9944552756E9CEF7BF /* PushQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 533DFD44FF2C81DF0E957713 /* PushQueueTests.swift */; };
 		5CC46CC10519FF79C305C765 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C444F28D5F466A3E9367FD2D /* SettingsStore.swift */; };
+		5DD77D26292E057D0D6D7910 /* MetricsCollector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F30A1541A83C82CACFC4684 /* MetricsCollector.swift */; };
 		5DDC9E7F1E6DB70C97FE2854 /* OpusStreamDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5CF4C77C6431292536368A4 /* OpusStreamDecoder.swift */; };
 		63E2F7E5D2AD1EA293924A0F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B7361350D8B378AC06E19D6C /* Assets.xcassets */; };
 		70C786289B250B1A749D2ADB /* TranscriptFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D3433B698F3DBC39DA5E291 /* TranscriptFormatter.swift */; };
+		7A00C673D2AD44FC0F62D1A3 /* PCMRenderFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C2266AF30DFE26AE09E8688 /* PCMRenderFile.swift */; };
 		7DFBBDC173A3D73E23E78A03 /* GitHubSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93B71C281CA11E52B9557ACA /* GitHubSync.swift */; };
 		967E2452AAAB501E527B25BE /* TokDownApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89093FCAEF6E13ABF38B0A06 /* TokDownApp.swift */; };
 		9D41A912DBC9DFCC7439787A /* OpusCaptureFileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A39775F9DFCCBEE02F136517 /* OpusCaptureFileTests.swift */; };
 		AA38A876935948F7FE130450 /* PushQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87B64E4DADD08F5573190E10 /* PushQueue.swift */; };
 		B4C5E4C3E0BD029905C4AA5D /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A655E4FC9D1E24AD594F27F /* ContentView.swift */; };
+		C1E468622193D00BF8654173 /* SpeechLanguageModelCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = C98E783207DB67A4CF8A143A /* SpeechLanguageModelCache.swift */; };
 		CCB58DEE357F48ED78008B2A /* TranscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F27A8C122CA2609FA6430E3 /* TranscriptionService.swift */; };
+		CDD00706F97B9EB8246948BF /* PerformanceTrace.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACFFDC9715E8C1F90BCC2A69 /* PerformanceTrace.swift */; };
 		CDF2CB80A75F011C58F49D06 /* LimitlessProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0141CB36E04D4861275E68F /* LimitlessProtocol.swift */; };
 /* End PBXBuildFile section */
 
@@ -44,6 +48,7 @@
 		0EBCB157602A299C83E0D30F /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		2E0091BA16A45667586600B3 /* PendantBLE.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendantBLE.swift; sourceTree = "<group>"; };
 		4003379AAB342CFEAB2806C1 /* OpusCaptureFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpusCaptureFile.swift; sourceTree = "<group>"; };
+		4C2266AF30DFE26AE09E8688 /* PCMRenderFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PCMRenderFile.swift; sourceTree = "<group>"; };
 		4D3433B698F3DBC39DA5E291 /* TranscriptFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptFormatter.swift; sourceTree = "<group>"; };
 		533DFD44FF2C81DF0E957713 /* PushQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushQueueTests.swift; sourceTree = "<group>"; };
 		6528D7C79826AB20BD98A600 /* TranscriptFormatterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptFormatterTests.swift; sourceTree = "<group>"; };
@@ -53,13 +58,16 @@
 		87B64E4DADD08F5573190E10 /* PushQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushQueue.swift; sourceTree = "<group>"; };
 		89093FCAEF6E13ABF38B0A06 /* TokDownApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokDownApp.swift; sourceTree = "<group>"; };
 		93B71C281CA11E52B9557ACA /* GitHubSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubSync.swift; sourceTree = "<group>"; };
+		9F30A1541A83C82CACFC4684 /* MetricsCollector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetricsCollector.swift; sourceTree = "<group>"; };
 		A39775F9DFCCBEE02F136517 /* OpusCaptureFileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpusCaptureFileTests.swift; sourceTree = "<group>"; };
 		A5CF4C77C6431292536368A4 /* OpusStreamDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpusStreamDecoder.swift; sourceTree = "<group>"; };
+		ACFFDC9715E8C1F90BCC2A69 /* PerformanceTrace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceTrace.swift; sourceTree = "<group>"; };
 		B0141CB36E04D4861275E68F /* LimitlessProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LimitlessProtocol.swift; sourceTree = "<group>"; };
 		B2D2258862F7C35468CE104F /* TokDownTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TokDownTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B7361350D8B378AC06E19D6C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		BFA9900AEB0EF66DDFA7701F /* TokDown.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TokDown.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C444F28D5F466A3E9367FD2D /* SettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStore.swift; sourceTree = "<group>"; };
+		C98E783207DB67A4CF8A143A /* SpeechLanguageModelCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechLanguageModelCache.swift; sourceTree = "<group>"; };
 		D88CF075B150FEF08112675D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		DCA1339080FE6BCCCD69117D /* CalendarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -86,13 +94,17 @@
 				93B71C281CA11E52B9557ACA /* GitHubSync.swift */,
 				D88CF075B150FEF08112675D /* Info.plist */,
 				B0141CB36E04D4861275E68F /* LimitlessProtocol.swift */,
+				9F30A1541A83C82CACFC4684 /* MetricsCollector.swift */,
 				4003379AAB342CFEAB2806C1 /* OpusCaptureFile.swift */,
 				A5CF4C77C6431292536368A4 /* OpusStreamDecoder.swift */,
+				4C2266AF30DFE26AE09E8688 /* PCMRenderFile.swift */,
 				2E0091BA16A45667586600B3 /* PendantBLE.swift */,
+				ACFFDC9715E8C1F90BCC2A69 /* PerformanceTrace.swift */,
 				87B64E4DADD08F5573190E10 /* PushQueue.swift */,
 				72E2E12B298F27D1A50D275E /* SessionManager.swift */,
 				C444F28D5F466A3E9367FD2D /* SettingsStore.swift */,
 				0EBCB157602A299C83E0D30F /* SettingsView.swift */,
+				C98E783207DB67A4CF8A143A /* SpeechLanguageModelCache.swift */,
 				89093FCAEF6E13ABF38B0A06 /* TokDownApp.swift */,
 				4D3433B698F3DBC39DA5E291 /* TranscriptFormatter.swift */,
 				7F27A8C122CA2609FA6430E3 /* TranscriptionService.swift */,
@@ -230,13 +242,17 @@
 				42B170C0B6BB58EC462BC965 /* DebugLog.swift in Sources */,
 				7DFBBDC173A3D73E23E78A03 /* GitHubSync.swift in Sources */,
 				CDF2CB80A75F011C58F49D06 /* LimitlessProtocol.swift in Sources */,
+				5DD77D26292E057D0D6D7910 /* MetricsCollector.swift in Sources */,
 				0A4704AB6F2E12BC26968C1F /* OpusCaptureFile.swift in Sources */,
 				5DDC9E7F1E6DB70C97FE2854 /* OpusStreamDecoder.swift in Sources */,
+				7A00C673D2AD44FC0F62D1A3 /* PCMRenderFile.swift in Sources */,
 				3997038CEF37C9D263B8222E /* PendantBLE.swift in Sources */,
+				CDD00706F97B9EB8246948BF /* PerformanceTrace.swift in Sources */,
 				AA38A876935948F7FE130450 /* PushQueue.swift in Sources */,
 				0B72ECAB5E95D7C50655E278 /* SessionManager.swift in Sources */,
 				5CC46CC10519FF79C305C765 /* SettingsStore.swift in Sources */,
 				1D391DCC4F02595E75C77823 /* SettingsView.swift in Sources */,
+				C1E468622193D00BF8654173 /* SpeechLanguageModelCache.swift in Sources */,
 				967E2452AAAB501E527B25BE /* TokDownApp.swift in Sources */,
 				70C786289B250B1A749D2ADB /* TranscriptFormatter.swift in Sources */,
 				CCB58DEE357F48ED78008B2A /* TranscriptionService.swift in Sources */,
