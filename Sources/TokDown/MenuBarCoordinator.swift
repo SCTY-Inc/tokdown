@@ -35,7 +35,8 @@ final class MenuBarCoordinator {
     // MARK: - Meetings
 
     func loadMeetings() async {
-        upcomingMeetings = await calendarService.upcomingMeetings(limit: 3)
+        let result = await calendarService.upcomingMeetings(limit: 3)
+        upcomingMeetings = result.meetings
     }
 
     // MARK: - Recording
@@ -43,6 +44,12 @@ final class MenuBarCoordinator {
     func startRecording(meeting: UpcomingMeeting? = nil) async {
         guard state == .idle else { return }
         statusMessage = nil
+
+        let speechAccessState = await transcriptionService.speechRecognitionAccessState(requestingIfNeeded: true)
+        guard speechAccessState == .authorized else {
+            statusMessage = speechAccessState.failureMessage
+            return
+        }
 
         let label = meeting?.title ?? settingsStore.settings.audioSource.title
         let useSystemAudio = settingsStore.settings.audioSource == .systemAudio

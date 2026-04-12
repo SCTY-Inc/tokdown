@@ -3,8 +3,57 @@ import Speech
 import AVFoundation
 import CoreMedia
 
+enum SpeechRecognitionAccessState: Equatable {
+    case authorized
+    case denied
+    case restricted
+    case notDetermined
+
+    init(status: SFSpeechRecognizerAuthorizationStatus) {
+        switch status {
+        case .authorized:
+            self = .authorized
+        case .denied:
+            self = .denied
+        case .restricted:
+            self = .restricted
+        case .notDetermined:
+            self = .notDetermined
+        @unknown default:
+            self = .restricted
+        }
+    }
+
+    var failureMessage: String? {
+        switch self {
+        case .authorized:
+            return nil
+        case .denied:
+            return "Speech recognition permission denied. Enable it in System Settings to transcribe recordings."
+        case .restricted:
+            return "Speech recognition is restricted on this Mac."
+        case .notDetermined:
+            return "Speech recognition permission is required before recording can start."
+        }
+    }
+}
+
 @MainActor
 final class TranscriptionService {
+    func speechRecognitionAccessState(requestingIfNeeded: Bool = false) async -> SpeechRecognitionAccessState {
+        let currentState = SpeechRecognitionAccessState(status: SFSpeechRecognizer.authorizationStatus())
+        guard requestingIfNeeded, currentState == .notDetermined else {
+            return currentState
+        }
+
+        let requestedStatus = await withCheckedContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { status in
+                continuation.resume(returning: status)
+            }
+        }
+        return SpeechRecognitionAccessState(status: requestedStatus)
+    }
+
     func ensureModelAvailable() async throws {
         let transcriber = SpeechTranscriber(locale: .current, preset: .transcription)
         let status = await AssetInventory.status(forModules: [transcriber])
