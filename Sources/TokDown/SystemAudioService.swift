@@ -40,15 +40,22 @@ final class SystemAudioService: NSObject {
         writer.startWriting()
 
         let handler = AudioOutputHandler(writer: writer, input: input)
-        self.outputHandler = handler
-        self.outputURL = url
-
         let scStream = SCStream(filter: filter, configuration: config, delegate: nil)
-        try scStream.addStreamOutput(handler, type: .audio, sampleHandlerQueue: DispatchQueue(label: "audio.capture"))
-        try await scStream.startCapture()
 
-        self.stream = scStream
-        self.isRecording = true
+        outputHandler = handler
+        outputURL = url
+        isRecording = false
+
+        do {
+            try scStream.addStreamOutput(handler, type: .audio, sampleHandlerQueue: DispatchQueue(label: "audio.capture"))
+            try await scStream.startCapture()
+        } catch {
+            await rollbackFailedStart(stream: scStream, handler: handler, outputURL: url)
+            throw error
+        }
+
+        stream = scStream
+        isRecording = true
     }
 
     func stopCapture() async -> URL? {
@@ -64,6 +71,23 @@ final class SystemAudioService: NSObject {
         outputURL = nil
         outputHandler = nil
         return url
+    }
+
+    private func rollbackFailedStart(stream: SCStream, handler: AudioOutputHandler, outputURL: URL) async {
+        try? await stream.stopCapture()
+        await handler.cancel()
+
+        Self.removePartialCaptureFile(at: outputURL)
+
+        self.stream = nil
+        self.outputHandler = nil
+        self.outputURL = nil
+        self.isRecording = false
+    }
+
+    static func removePartialCaptureFile(at url: URL, fileManager: FileManager = .default) {
+        guard fileManager.fileExists(atPath: url.path) else { return }
+        try? fileManager.removeItem(at: url)
     }
 }
 
@@ -102,6 +126,12 @@ private final class AudioOutputHandler: NSObject, SCStreamOutput {
         queue.sync {}
         input.markAsFinished()
         await writer.finishWriting()
+    }
+
+    @MainActor func cancel() async {
+        queue.sync {}
+        input.markAsFinished()
+        writer.cancelWriting()
     }
 }
 
