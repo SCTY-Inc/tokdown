@@ -51,6 +51,17 @@ struct SettingsView: View {
                         Text(mode.rawValue.capitalized).tag(mode)
                     }
                 }
+
+                Picker("Transcription", selection: $session.settings.transcriptionMode) {
+                    ForEach(SessionManager.TranscriptionMode.allCases, id: \.self) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(session.settings.transcriptionMode.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Vocabulary Hints") {

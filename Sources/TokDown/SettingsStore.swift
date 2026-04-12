@@ -22,6 +22,11 @@ final class SettingsStore {
         didSet { defaults.set(autoPushEnabled, forKey: "autoPushEnabled") }
     }
 
+    /// How transcription should run for new recordings.
+    var transcriptionMode: SessionManager.TranscriptionMode {
+        didSet { defaults.set(transcriptionMode.rawValue, forKey: "transcriptionMode") }
+    }
+
     /// Target GitHub repo (owner/name)
     var transcriptRepo: String {
         didSet { defaults.set(transcriptRepo, forKey: "transcriptRepo") }
@@ -48,5 +53,8 @@ final class SettingsStore {
 
         let modeRaw = defaults.string(forKey: "recordingMode") ?? "manual"
         self.recordingMode = SessionManager.RecordingMode(rawValue: modeRaw) ?? .manual
+
+        let transcriptionModeRaw = defaults.string(forKey: "transcriptionMode") ?? SessionManager.TranscriptionMode.lowPower.rawValue
+        self.transcriptionMode = SessionManager.TranscriptionMode(rawValue: transcriptionModeRaw) ?? .lowPower
     }
 }

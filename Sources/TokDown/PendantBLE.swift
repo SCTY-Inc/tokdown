@@ -55,6 +55,7 @@ final class PendantBLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
     private var reconnectWorkItem: DispatchWorkItem?
     private var needsServiceDiscovery = false
     private var handshakeComplete = false
+    private var reconnectDelay: TimeInterval = 2
     private let reassembler = FragmentReassembler()
 
     // MARK: - Public API
@@ -132,11 +133,13 @@ final class PendantBLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
 
     private func scheduleReconnect() {
         reconnectWorkItem?.cancel()
+        let delay = reconnectDelay
         let work = DispatchWorkItem { [weak self] in
             self?.startScanning()
         }
         reconnectWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        reconnectDelay = min(reconnectDelay * 2, 30)
     }
 
     /// After RX notify is confirmed, send timeSync to complete the handshake.
@@ -243,6 +246,7 @@ final class PendantBLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        reconnectDelay = 2
         peripheral.delegate = self
         connectionState = .connected
         peripheralName = peripheral.name

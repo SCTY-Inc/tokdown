@@ -111,16 +111,22 @@ struct TranscriptFormatter {
         fullText: String,
         lines: [TranscriptionService.TranscriptLine]
     ) -> String {
-        if lines.isEmpty {
+        let filteredLines = lines.compactMap { line -> TranscriptionService.TranscriptLine? in
+            let text = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            return TranscriptionService.TranscriptLine(timestamp: line.timestamp, text: text)
+        }
+
+        if filteredLines.isEmpty {
             let trimmed = fullText.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? "(No transcript)" : trimmed
         }
 
         var result: [String] = []
         var currentChunk: [String] = []
-        var chunkStart = lines[0].timestamp
+        var chunkStart = filteredLines[0].timestamp
 
-        for line in lines {
+        for line in filteredLines {
             if line.timestamp - chunkStart > 5, !currentChunk.isEmpty {
                 result.append("[\(formatTimestamp(chunkStart))] \(currentChunk.joined(separator: " "))")
                 currentChunk = []

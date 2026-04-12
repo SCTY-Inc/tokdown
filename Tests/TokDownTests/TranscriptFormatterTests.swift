@@ -278,6 +278,21 @@ struct TranscriptFormatterTests {
         #expect(!doc.markdown.contains("(No transcript)"))
     }
 
+    @Test("Whitespace-only timestamped lines fall back to fullText instead of emitting an empty [00:00] row")
+    func whitespaceOnlyLinesFallBackToFullText() throws {
+        let doc = Self.makeFormatter().makeDocument(
+            title: "Plain",
+            startTime: Self.fixedStart,
+            endTime: Self.fixedEnd,
+            meeting: nil,
+            fullText: "Recovered transcript",
+            lines: [Self.line("   ", at: 0)]
+        )
+
+        #expect(doc.markdown.contains("Recovered transcript"))
+        #expect(!doc.markdown.contains("[00:00]"))
+    }
+
     @Test("YAML double quotes in title are escaped")
     func yamlEscapesQuotes() throws {
         let doc = Self.makeFormatter().makeDocument(

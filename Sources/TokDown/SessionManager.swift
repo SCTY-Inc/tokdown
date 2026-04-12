@@ -24,12 +24,51 @@ final class SessionManager {
         case calendar
     }
 
+    enum TranscriptionMode: String, CaseIterable, Sendable {
+        case live
+        case lowPower
+
+        var title: String {
+            switch self {
+            case .live: "Live"
+            case .lowPower: "Low Power"
+            }
+        }
+
+        var summary: String {
+            switch self {
+            case .live:
+                "Live transcript while recording. Higher battery use."
+            case .lowPower:
+                "Capture first, transcribe after stop. Best for longer sessions."
+            }
+        }
+    }
+
     var state: State = .idle
     var recordingMode: RecordingMode = .manual
     var currentTitle: String = ""
     var recordingDuration: TimeInterval = 0
     var lastError: String?
     var recentTranscripts: [RecentTranscript] = []
+
+    var transcriptionMode: TranscriptionMode {
+        activeTranscriptionMode ?? settings.transcriptionMode
+    }
+
+    var processingStatusText: String {
+        switch state {
+        case .transcribing:
+            switch transcriptionMode {
+            case .live: "Finalizing transcript..."
+            case .lowPower: "Transcribing saved audio..."
+            }
+        case .pushing:
+            "Pushing to GitHub..."
+        default:
+            ""
+        }
+    }
 
     let ble: PendantBLE
     let transcription: TranscriptionService
@@ -45,6 +84,8 @@ final class SessionManager {
     private var disconnectGraceTimer: Timer?
     private var recordingStart: Date?
     private var currentMeeting: CalendarService.Meeting?
+    private var activeTranscriptionMode: TranscriptionMode?
+    private var deferredCapture: OpusCaptureFile?
 
     struct RecentTranscript: Identifiable {
         let id = UUID()
@@ -91,26 +132,23 @@ final class SessionManager {
     func startRecording(meeting: CalendarService.Meeting? = nil) {
         guard state == .idle else { return }
 
-        state = .recording
-        recordingStart = Date()
-        recordingDuration = 0
         lastError = nil
         currentMeeting = meeting
         currentTitle = meeting?.title ?? ""
+        decodedFrameCount = 0
+        decodeFailCount = 0
+        activeTranscriptionMode = settings.transcriptionMode
 
-        activateAudioSession()
-
-        opusDecoder = OpusStreamDecoder()
-        if opusDecoder == nil {
-            lastError = "Opus decoder init failed — audio won't transcribe"
+        guard prepareRecordingPipeline() else {
+            activeTranscriptionMode = nil
+            currentMeeting = nil
+            currentTitle = ""
+            return
         }
 
-        transcription.contextualStrings = settings.vocabularyHints
-        transcription.startTranscription()
-
-        if let error = transcription.lastError {
-            lastError = error
-        }
+        state = .recording
+        recordingStart = Date()
+        recordingDuration = 0
 
         let stream = ble.startOpusStream()
         audioTask = Task { @MainActor [weak self] in
@@ -157,7 +195,8 @@ final class SessionManager {
                 }
             }
 
-            let snapshot = await transcription.finishTranscription()
+            let snapshot = await transcribeStoppedRecording()
+            DebugLog.write("snapshot fullTextLen=\(snapshot.fullText.count) lines=\(snapshot.lines.count) decoded=\(self.decodedFrameCount) decodeFails=\(self.decodeFailCount)")
 
             var resolvedTitle = title
             if resolvedTitle.isEmpty, !snapshot.fullText.isEmpty {
@@ -177,6 +216,7 @@ final class SessionManager {
             var savedURL: URL?
             do {
                 savedURL = try saveTranscriptLocally(doc)
+                DebugLog.write("saved transcript file=\(doc.filename) markdownLen=\(doc.markdown.count)")
             } catch {
                 lastError = "Local save failed: \(error.localizedDescription)"
             }
@@ -214,18 +254,34 @@ final class SessionManager {
     private var decodeFailCount = 0
 
     private func processOpusFrame(_ frame: Data) {
-        guard let samples = opusDecoder?.decode(opusFrame: frame) else {
-            decodeFailCount += 1
-            if shouldLogDecodeFailure(count: decodeFailCount) {
-                DebugLog.write("opus decode FAIL #\(decodeFailCount) frameLen=\(frame.count) decoder=\(opusDecoder != nil)")
+        switch transcriptionMode {
+        case .live:
+            guard let samples = opusDecoder?.decode(opusFrame: frame) else {
+                decodeFailCount += 1
+                if shouldLogDecodeFailure(count: decodeFailCount) {
+                    DebugLog.write("opus decode FAIL #\(decodeFailCount) frameLen=\(frame.count) decoder=\(opusDecoder != nil)")
+                }
+                return
             }
-            return
+            decodedFrameCount += 1
+            if shouldLogDecodedFrame(count: decodedFrameCount) {
+                DebugLog.write("decoded #\(decodedFrameCount) samples=\(samples.count)")
+            }
+            transcription.appendAudio(samples: samples)
+
+        case .lowPower:
+            guard let deferredCapture else {
+                lastError = "Low Power capture is unavailable for this recording"
+                stopRecording()
+                return
+            }
+            do {
+                try deferredCapture.append(frame: frame)
+            } catch {
+                lastError = "Low Power capture failed: \(error.localizedDescription)"
+                stopRecording()
+            }
         }
-        decodedFrameCount += 1
-        if shouldLogDecodedFrame(count: decodedFrameCount) {
-            DebugLog.write("decoded #\(decodedFrameCount) samples=\(samples.count)")
-        }
-        transcription.appendAudio(samples: samples)
     }
 
     private func shouldLogDecodedFrame(count: Int) -> Bool {
@@ -234,6 +290,97 @@ final class SessionManager {
 
     private func shouldLogDecodeFailure(count: Int) -> Bool {
         count <= 5 || count.isMultiple(of: 25)
+    }
+
+    private func prepareRecordingPipeline() -> Bool {
+        deferredCapture?.delete()
+        deferredCapture = nil
+
+        switch transcriptionMode {
+        case .live:
+            activateAudioSession()
+            opusDecoder = OpusStreamDecoder()
+            if opusDecoder == nil {
+                lastError = "Opus decoder init failed — audio won't transcribe"
+            }
+
+            transcription.contextualStrings = settings.vocabularyHints
+            transcription.startTranscription()
+
+            if let error = transcription.lastError {
+                lastError = error
+            }
+            return true
+
+        case .lowPower:
+            opusDecoder = nil
+            do {
+                deferredCapture = try OpusCaptureFile()
+                return true
+            } catch {
+                lastError = "Couldn't start Low Power capture: \(error.localizedDescription)"
+                return false
+            }
+        }
+    }
+
+    private func transcribeStoppedRecording() async -> TranscriptionService.Snapshot {
+        switch transcriptionMode {
+        case .live:
+            return await transcription.finishTranscription()
+
+        case .lowPower:
+            return await transcribeDeferredCapture()
+        }
+    }
+
+    private func transcribeDeferredCapture() async -> TranscriptionService.Snapshot {
+        guard let deferredCapture else {
+            return .init(fullText: "", lines: [])
+        }
+
+        let captureURL: URL
+        do {
+            captureURL = try deferredCapture.finalize()
+        } catch {
+            lastError = "Couldn't finalize Low Power capture: \(error.localizedDescription)"
+            self.deferredCapture = nil
+            return .init(fullText: "", lines: [])
+        }
+        self.deferredCapture = nil
+        defer { try? FileManager.default.removeItem(at: captureURL) }
+
+        guard let decoder = OpusStreamDecoder() else {
+            lastError = "Opus decoder init failed — audio won't transcribe"
+            return .init(fullText: "", lines: [])
+        }
+
+        transcription.contextualStrings = settings.vocabularyHints
+        transcription.startTranscription()
+        if let error = transcription.lastError {
+            lastError = error
+        }
+
+        do {
+            try OpusCaptureFile.forEachFrame(at: captureURL) { frame in
+                guard let samples = decoder.decode(opusFrame: frame) else {
+                    decodeFailCount += 1
+                    if shouldLogDecodeFailure(count: decodeFailCount) {
+                        DebugLog.write("deferred opus decode FAIL #\(decodeFailCount) frameLen=\(frame.count)")
+                    }
+                    return
+                }
+                decodedFrameCount += 1
+                if shouldLogDecodedFrame(count: decodedFrameCount) {
+                    DebugLog.write("deferred decoded #\(decodedFrameCount) samples=\(samples.count)")
+                }
+                transcription.appendAudio(samples: samples)
+            }
+        } catch {
+            lastError = "Couldn't read Low Power capture: \(error.localizedDescription)"
+        }
+
+        return await transcription.finishTranscription()
     }
 
     private func checkCalendarState() {
@@ -295,9 +442,13 @@ final class SessionManager {
         recordingDuration = 0
         recordingStart = nil
         currentMeeting = nil
+        activeTranscriptionMode = nil
         ble.onConnectionStateChanged = nil
         disconnectGraceTimer?.invalidate()
         disconnectGraceTimer = nil
+        deferredCapture?.delete()
+        deferredCapture = nil
+        opusDecoder = nil
         deactivateAudioSession()
     }
 

@@ -1,5 +1,15 @@
 # Solutions Log
 
+## 2026-04-11: Saved transcript collapsed to empty `[00:00]` block despite live text on screen
+**Problem**: TokDown showed a reasonable live transcript during recording, but the saved markdown sometimes contained only `[00:00]` or blank content.
+**Root cause**: `SFSpeechRecognizer` can produce a final result where `bestTranscription.segments` is empty or whitespace-only even though `formattedString` still contains useful text. The save path trusted the segment list too aggressively, so the formatter emitted an empty timestamp row.
+**Fix**: In `TranscriptionService`, preserve the last non-empty snapshot, fall back to `formattedString` when segment data is empty, filter whitespace-only lines, and make chunk timing audio-duration-based instead of wall-clock-based. In `TranscriptFormatter`, ignore whitespace-only lines and fall back to `fullText` instead of emitting an empty `[00:00]` block.
+
+## 2026-04-11: All-day battery target needed a lower-power recording path
+**Problem**: Continuous live transcription drained battery too quickly for longer or all-day use.
+**Root cause**: The app kept `SFSpeechRecognizer` active throughout the recording session, which is much more expensive than just capturing pendant audio.
+**Fix**: Added `TranscriptionMode` with `lowPower` (default) and `live`. `lowPower` stores length-prefixed Opus frames in `OpusCaptureFile`, then decodes/transcribes after stop. Also added BLE reconnect backoff (2s doubling up to 30s) to reduce idle battery drain when the pendant is unavailable.
+
 ## 2026-04-07: Limitless Pendant battery drain — enableDataStream sent on every BLE connect
 **Problem**: Pendant battery dying fast. Audio data stream was enabled immediately on every BLE connect (including app launch and reconnects), regardless of whether a recording was active.
 **Root cause**: `startStreamingHandshake()` sent both `timeSync` and `enableDataStream` whenever the RX characteristic started notifying. The pendant's audio encoder and BLE radio stayed active 24/7.

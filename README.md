@@ -2,26 +2,33 @@
 
 iOS app that connects to a [Limitless Pendant](https://www.limitless.ai/) via BLE, transcribes audio on-device using Apple Speech, and pushes markdown transcripts to GitHub.
 
+TokDown supports two transcription paths:
+- `Low Power` (default) — capture pendant audio first, transcribe after stop
+- `Live` — show a live transcript while recording
+
 Companion to [TokDown for macOS](https://github.com/amadad/tokdown).
 
 ## How It Works
 
 ```
-Pendant (BLE) -> Opus decode -> Speech recognition -> Markdown -> GitHub
+Pendant (BLE) -> Opus capture/decode -> Speech recognition -> Markdown -> GitHub
 ```
 
 1. Connects to Limitless Pendant over Bluetooth LE
-2. Decodes Opus audio frames via [libopus](https://github.com/alta/swift-opus)
-3. Transcribes with on-device `SFSpeechRecognizer` (chunked every 45s)
+2. Receives protobuf-fragmented Opus audio frames from the pendant
+3. Either:
+   - transcribes live with on-device `SFSpeechRecognizer`, or
+   - stores Opus frames for deferred transcription after stop (`Low Power`)
 4. Formats as timestamped markdown with YAML front matter
 5. Pushes to GitHub via Contents API
 
 ## Features
 
 - **Manual or calendar-driven recording** -- auto-start/stop based on calendar events
+- **Low Power or Live transcription** -- choose battery-friendly deferred transcription or live transcript preview
 - **On-device transcription** -- no cloud APIs, works offline
 - **Background recording** -- continues when app is backgrounded
-- **Auto-reconnect** -- recovers from BLE disconnects mid-recording
+- **Auto-reconnect with backoff** -- recovers from BLE disconnects without constant 2-second retries
 - **Transcript editing** -- review and edit before pushing
 - **Push queue** -- retries failed pushes when network returns
 
@@ -51,6 +58,8 @@ xcodebuild -project TokDown.xcodeproj -scheme TokDown \
 
 Add your GitHub PAT in the app's Settings screen. Transcripts push to the configured repo.
 
+The app defaults to `Low Power` transcription mode for better battery life on longer recordings. Switch to `Live` in Settings when you want real-time transcript feedback.
+
 ## Architecture
 
 | File | Purpose |
@@ -58,8 +67,9 @@ Add your GitHub PAT in the app's Settings screen. Transcripts push to the config
 | `PendantBLE.swift` | CoreBluetooth manager, BLE handshake |
 | `LimitlessProtocol.swift` | Protobuf encode/decode, fragment reassembly, Opus extraction |
 | `OpusStreamDecoder.swift` | libopus wrapper |
+| `OpusCaptureFile.swift` | Temp Opus frame capture for Low Power mode |
 | `TranscriptionService.swift` | Chunked SFSpeechRecognizer |
-| `SessionManager.swift` | Pipeline orchestrator |
+| `SessionManager.swift` | Pipeline orchestrator for Live and Low Power modes |
 | `TranscriptFormatter.swift` | Markdown + YAML front matter |
 | `GitHubSync.swift` | GitHub Contents API push |
 | `PushQueue.swift` | Offline retry queue |

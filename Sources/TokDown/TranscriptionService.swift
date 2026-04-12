@@ -46,9 +46,8 @@ final class TranscriptionService {
     // Double-buffer: next chunk's request is created before the current one ends
     private var pendingRequest: SFSpeechAudioBufferRecognitionRequest?
 
-    // Timing
-    private var recordingStartTime: Date?
-    private var chunkTimer: Timer?
+    // Audio timing
+    private var sampleRate: Double = 16000
 
     // Sample batching: accumulate small Opus frames before appending to recognizer
     private var sampleBuffer: [Int16] = []
@@ -56,11 +55,12 @@ final class TranscriptionService {
 
     // Overlap: keep last 1 second of audio to pre-fill next chunk
     private var overlapBuffer: [Int16] = []
-    private static let overlapSamples = 16000 // 1 second at 16kHz
 
     // Chunk line tracking
     private var committedLines: [TranscriptLine] = []
     private var currentChunkLines: [TranscriptLine] = []
+    private var lastNonEmptySnapshot: Snapshot?
+    private var speechResultLogCount = 0
 
     // Track samples fed to current chunk (for short-chunk detection)
     private var currentChunkSampleCount = 0
@@ -91,6 +91,7 @@ final class TranscriptionService {
         }
         lastError = nil
 
+        self.sampleRate = sampleRate
         audioFormat = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
             sampleRate: sampleRate,
@@ -105,23 +106,14 @@ final class TranscriptionService {
         sampleBuffer = []
         overlapBuffer = []
         currentChunkSampleCount = 0
-        recordingStartTime = Date()
         chunkStartOffset = 0
         finishContinuation = nil
         finishTimeoutTask?.cancel()
         finishTimeoutTask = nil
+        lastNonEmptySnapshot = nil
+        speechResultLogCount = 0
 
         startChunk()
-
-        chunkTimer = Timer.scheduledTimer(
-            withTimeInterval: chunkDuration,
-            repeats: true
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.restartChunk()
-            }
-        }
-
         isTranscribing = true
     }
 
@@ -132,32 +124,35 @@ final class TranscriptionService {
 
         // Maintain overlap buffer (last 1 second of audio)
         overlapBuffer.append(contentsOf: samples)
-        if overlapBuffer.count > Self.overlapSamples {
-            overlapBuffer.removeFirst(overlapBuffer.count - Self.overlapSamples)
+        if overlapBuffer.count > overlapSampleLimit {
+            overlapBuffer.removeFirst(overlapBuffer.count - overlapSampleLimit)
         }
 
         sampleBuffer.append(contentsOf: samples)
         if sampleBuffer.count >= Self.batchSize {
             flushSampleBuffer()
+            restartChunkIfNeeded()
         }
     }
 
     func finishTranscription() async -> Snapshot {
         guard isTranscribing else { return snapshot() }
 
-        chunkTimer?.invalidate()
-        chunkTimer = nil
-
         flushSampleBuffer()
 
         // If current chunk has very little audio (<2s), don't wait for it
-        let minSamplesForResult = 32000 // 2 seconds at 16kHz
+        let minSamplesForResult = Int(sampleRate * 2)
         if currentChunkSampleCount < minSamplesForResult {
-            // Commit what we have and return immediately
-            lines = committedLines + currentChunkLines
+            // Commit what we have and return immediately.
+            // Preserve the last non-empty live transcript if Speech emits an
+            // empty closing update while the user stops recording.
+            lines = sanitizeTranscriptLines(committedLines + currentChunkLines)
             fullText = lines.map(\.text).joined(separator: " ")
+            rememberNonEmptySnapshotIfNeeded()
+            let result = snapshotWithFallback()
+            DebugLog.write("finish short chunk fullTextLen=\(result.fullText.count) lines=\(result.lines.count) samples=\(currentChunkSampleCount)")
             teardown()
-            return snapshot()
+            return result
         }
 
         return await withCheckedContinuation { continuation in
@@ -207,13 +202,11 @@ final class TranscriptionService {
         guard isTranscribing, finishContinuation == nil else { return }
 
         // Commit current chunk's lines
-        committedLines = committedLines + currentChunkLines
+        committedLines = sanitizeTranscriptLines(committedLines + currentChunkLines)
         currentChunkLines = []
 
-        // Update offset for the next chunk
-        if let start = recordingStartTime {
-            chunkStartOffset = Date().timeIntervalSince(start)
-        }
+        // Update offset for the next chunk based on audio duration, not wall time.
+        chunkStartOffset += Double(currentChunkSampleCount) / sampleRate
 
         // Create next request BEFORE ending current one (double-buffer)
         let nextRequest = makeRequest()
@@ -244,15 +237,42 @@ final class TranscriptionService {
         chunkOffset: TimeInterval
     ) {
         if let result {
-            currentChunkLines = result.bestTranscription.segments.map { segment in
-                TranscriptLine(
+            let formattedText = result.bestTranscription.formattedString
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let segmentLines = result.bestTranscription.segments.compactMap { segment -> TranscriptLine? in
+                let text = segment.substring.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { return nil }
+                return TranscriptLine(
                     timestamp: chunkOffset + segment.timestamp,
-                    text: segment.substring
+                    text: text
+                )
+            }
+            let resolvedChunkLines: [TranscriptLine]
+            if !segmentLines.isEmpty {
+                resolvedChunkLines = segmentLines
+            } else if !formattedText.isEmpty {
+                resolvedChunkLines = [TranscriptLine(timestamp: chunkOffset, text: formattedText)]
+            } else {
+                resolvedChunkLines = []
+            }
+
+            speechResultLogCount += 1
+            if speechResultLogCount <= 3 || result.isFinal {
+                DebugLog.write(
+                    "speech result #\(speechResultLogCount) final=\(result.isFinal) segments=\(result.bestTranscription.segments.count) nonEmpty=\(resolvedChunkLines.count) formattedLen=\(formattedText.count)"
                 )
             }
 
-            lines = committedLines + currentChunkLines
-            fullText = lines.map(\.text).joined(separator: " ")
+            let hasExistingTranscript = !(committedLines.isEmpty && currentChunkLines.isEmpty)
+            if resolvedChunkLines.isEmpty, hasExistingTranscript {
+                if result.isFinal, finishContinuation != nil {
+                    completeIfNeeded()
+                }
+                return
+            }
+
+            currentChunkLines = resolvedChunkLines
+            updateMergedTranscript(formattedFallback: formattedText)
 
             if result.isFinal, finishContinuation != nil {
                 completeIfNeeded()
@@ -308,12 +328,20 @@ final class TranscriptionService {
         completeIfNeeded()
     }
 
-    private func completeIfNeeded() {
-        lines = committedLines + currentChunkLines
-        deduplicateChunkBoundaries()
-        fullText = lines.map(\.text).joined(separator: " ")
+    private func restartChunkIfNeeded() {
+        guard currentChunkSampleCount >= chunkSampleLimit else { return }
+        restartChunk()
+    }
 
-        let result = snapshot()
+    private func completeIfNeeded() {
+        lines = sanitizeTranscriptLines(committedLines + currentChunkLines)
+        deduplicateChunkBoundaries()
+        lines = sanitizeTranscriptLines(lines)
+        fullText = lines.map(\.text).joined(separator: " ")
+        rememberNonEmptySnapshotIfNeeded()
+
+        let result = snapshotWithFallback()
+        DebugLog.write("finish transcription fullTextLen=\(result.fullText.count) lines=\(result.lines.count)")
         let continuation = finishContinuation
         finishContinuation = nil
         finishTimeoutTask?.cancel()
@@ -324,8 +352,6 @@ final class TranscriptionService {
     }
 
     private func teardown() {
-        chunkTimer?.invalidate()
-        chunkTimer = nil
         recognitionRequest = nil
         recognitionTask?.cancel()
         recognitionTask = nil
@@ -335,6 +361,51 @@ final class TranscriptionService {
         isTranscribing = false
         sampleBuffer = []
         overlapBuffer = []
+    }
+
+    private var chunkSampleLimit: Int {
+        Int(sampleRate * chunkDuration)
+    }
+
+    private var overlapSampleLimit: Int {
+        Int(sampleRate)
+    }
+
+    private func updateMergedTranscript(formattedFallback: String? = nil) {
+        lines = sanitizeTranscriptLines(committedLines + currentChunkLines)
+        let mergedText = lines.map(\.text).joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !mergedText.isEmpty {
+            fullText = mergedText
+        } else if let formattedFallback, !formattedFallback.isEmpty {
+            fullText = formattedFallback
+        } else {
+            fullText = ""
+        }
+        rememberNonEmptySnapshotIfNeeded()
+    }
+
+    private func sanitizeTranscriptLines(_ lines: [TranscriptLine]) -> [TranscriptLine] {
+        lines.compactMap { line in
+            let text = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            return TranscriptLine(timestamp: line.timestamp, text: text)
+        }
+    }
+
+    private func rememberNonEmptySnapshotIfNeeded() {
+        let trimmed = fullText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty || !lines.isEmpty else { return }
+        lastNonEmptySnapshot = Snapshot(fullText: fullText, lines: lines)
+    }
+
+    private func snapshotWithFallback() -> Snapshot {
+        let current = snapshot()
+        let trimmed = current.fullText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty, current.lines.isEmpty, let fallback = lastNonEmptySnapshot {
+            return fallback
+        }
+        return current
     }
 
     private func snapshot() -> Snapshot {

@@ -112,29 +112,32 @@ struct ContentView: View {
     // MARK: - Recording Card
 
     private var recordingCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "waveform")
-                    .foregroundStyle(.red)
-                Text("REC")
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .firstTextBaseline) {
+                Label("Recording", systemImage: "waveform")
                     .font(.headline)
                     .foregroundStyle(.red)
+
+                Spacer()
+
                 Text(formattedDuration)
-                    .font(.headline.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .font(.title3.monospacedDigit())
+                    .foregroundStyle(.primary)
             }
+
+            Text(session.transcriptionMode.title)
+                .font(.caption.bold())
+                .foregroundStyle(.red)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(.red.opacity(0.12), in: Capsule())
 
             if !session.currentTitle.isEmpty {
                 Text(session.currentTitle)
-                    .font(.body)
+                    .font(.headline)
             }
 
-            if !transcription.fullText.isEmpty {
-                Text(transcription.fullText.suffix(200))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-            }
+            transcriptStatusPanel
 
             Button(action: { session.stopRecording() }) {
                 Label("Stop", systemImage: "stop.fill")
@@ -145,7 +148,7 @@ struct ContentView: View {
         }
         .padding()
         .background(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 16)
                 .fill(.red.opacity(0.08))
         )
     }
@@ -162,7 +165,7 @@ struct ContentView: View {
     private var processingCard: some View {
         VStack(spacing: 12) {
             ProgressView()
-            Text(session.state == .transcribing ? "Transcribing..." : "Pushing to GitHub...")
+            Text(session.processingStatusText)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -177,14 +180,63 @@ struct ContentView: View {
     // MARK: - Record Button
 
     private var recordButton: some View {
-        Button(action: { session.startRecording() }) {
-            Label("Record", systemImage: "waveform")
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
+        VStack(alignment: .leading, spacing: 10) {
+            Button(action: { session.startRecording() }) {
+                Label("Record", systemImage: "waveform")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(ble.connectionState != .connected)
+
+            Text(session.transcriptionMode.summary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
-        .buttonStyle(.borderedProminent)
-        .disabled(ble.connectionState != .connected)
+    }
+
+    private var transcriptStatusPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            switch session.transcriptionMode {
+            case .live:
+                Text("Live transcript")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if livePreviewText.isEmpty {
+                    Text("Listening for speech…")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(livePreviewText)
+                        .font(.body)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+            case .lowPower:
+                Text("Low Power capture")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("TokDown is saving pendant audio now and will transcribe after you stop.")
+                    .font(.body)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(.background)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(.quaternary, lineWidth: 1)
+        }
+    }
+
+    private var livePreviewText: String {
+        transcription.fullText
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: - Upcoming Meetings
@@ -199,23 +251,17 @@ struct ContentView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(calendar.upcomingMeetings) { meeting in
+                ForEach(Array(calendar.upcomingMeetings.enumerated()), id: \.element.id) { index, meeting in
                     Button(action: { session.startRecording(meeting: meeting) }) {
-                        HStack {
-                            Image(systemName: "circle")
-                                .font(.system(size: 8))
-                                .foregroundStyle(.secondary)
-                            Text(meetingTime(meeting.startDate))
-                                .font(.subheadline.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                            Text(meeting.title)
-                                .font(.subheadline)
-                                .lineLimit(1)
-                            Spacer()
-                        }
+                        upcomingMeetingRow(meeting)
                     }
                     .buttonStyle(.plain)
+                    .contentShape(Rectangle())
                     .disabled(ble.connectionState != .connected)
+
+                    if index < calendar.upcomingMeetings.count - 1 {
+                        Divider().padding(.leading, 18)
+                    }
                 }
             }
         }
@@ -233,30 +279,71 @@ struct ContentView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(session.recentTranscripts) { transcript in
+                ForEach(Array(session.recentTranscripts.enumerated()), id: \.element.id) { index, transcript in
                     NavigationLink(destination: TranscriptDetailView(transcript: transcript)) {
-                        HStack {
-                            Image(systemName: transcript.pushed
-                                  ? "checkmark.circle.fill"
-                                  : "checkmark.circle")
-                                .font(.system(size: 12))
-                                .foregroundStyle(transcript.pushed ? .green : .secondary)
-                            Text(meetingTime(transcript.date))
-                                .font(.subheadline.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                            Text(transcript.title)
-                                .font(.subheadline)
-                                .lineLimit(1)
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.tertiary)
-                        }
+                        recentTranscriptRow(transcript)
                     }
                     .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+
+                    if index < session.recentTranscripts.count - 1 {
+                        Divider().padding(.leading, 24)
+                    }
                 }
             }
         }
+    }
+
+    private func upcomingMeetingRow(_ meeting: CalendarService.Meeting) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "circle")
+                .font(.system(size: 8))
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(meeting.title)
+                    .font(.subheadline)
+                    .lineLimit(1)
+                Text(meetingTime(meeting.startDate))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 12)
+    }
+
+    private func recentTranscriptRow(_ transcript: SessionManager.RecentTranscript) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: transcript.pushed
+                  ? "checkmark.circle.fill"
+                  : "checkmark.circle")
+                .font(.system(size: 14))
+                .foregroundStyle(transcript.pushed ? .green : .secondary)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(transcript.title)
+                    .font(.subheadline)
+                    .lineLimit(1)
+                Text(meetingTime(transcript.date))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 14)
     }
 
     // MARK: - Error Banner

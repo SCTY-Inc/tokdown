@@ -1,6 +1,6 @@
 # CLAUDE.md -- TokDown
 
-iOS companion to TokDown (macOS). Connects to Limitless Pendant via BLE -> on-device speech recognition -> markdown -> GitHub push.
+iOS companion to TokDown (macOS). Connects to Limitless Pendant via BLE -> live or deferred on-device transcription -> markdown -> GitHub push.
 
 Sibling: [TokDown for macOS](https://github.com/amadad/tokdown)
 
@@ -15,16 +15,24 @@ xcrun devicectl device process launch --device <UDID> com.amadad.tokdown
 ```
 
 ## Architecture
-BLE RX notifications -> FragmentReassembler -> OpusFrameExtractor -> OpusStreamDecoder (libopus via swift-opus) -> TranscriptionService (SFSpeechRecognizer, chunked) -> TranscriptFormatter -> GitHubSync
+BLE RX notifications -> FragmentReassembler -> OpusFrameExtractor ->
+- Live mode: OpusStreamDecoder -> TranscriptionService (chunked SFSpeechRecognizer while recording)
+- Low Power mode: OpusCaptureFile -> stop recording -> OpusStreamDecoder -> TranscriptionService
+-> TranscriptFormatter -> GitHubSync
 
 States: idle -> recording -> transcribing -> pushing
+
+Transcription modes:
+- `lowPower` (default) -- capture Opus during recording, transcribe after stop for better battery life
+- `live` -- live transcript while recording, higher battery use
 
 Key files:
 - `LimitlessProtocol.swift` -- protobuf encode/decode, BLE commands (timeSync, enableDataStream, disableDataStream), FragmentReassembler, OpusFrameExtractor
 - `OpusStreamDecoder.swift` -- libopus wrapper (Opus.Decoder from swift-opus)
-- `PendantBLE.swift` -- CoreBluetooth manager, Limitless handshake, name-based scan filter
-- `TranscriptionService.swift` -- chunked SFSpeechRecognizer (restarts every 45s to avoid ~1min degradation)
-- `SessionManager.swift` -- pipeline orchestrator, Opus frames -> decode -> transcribe
+- `OpusCaptureFile.swift` -- temp length-prefixed Opus frame capture for Low Power mode
+- `PendantBLE.swift` -- CoreBluetooth manager, Limitless handshake, reconnect backoff, name-based scan filter
+- `TranscriptionService.swift` -- chunked SFSpeechRecognizer (restarts by audio duration to avoid ~1min degradation)
+- `SessionManager.swift` -- pipeline orchestrator; chooses live vs deferred transcription path
 - `TranscriptFormatter.swift` -- YAML front matter + timestamped markdown
 - `DebugLog.swift` -- writes to Documents/debug.log for on-device diagnostics
 - `project.yml` -- XcodeGen config (source of truth for xcodeproj)
@@ -50,6 +58,8 @@ Same format as TokDown macOS -- transcripts are indistinguishable in the archive
 ## Gotchas
 - Limitless Pendant uses protobuf-wrapped BLE protocol (NOT standard Omi 3-byte header)
 - Must send timeSync before enableDataStream; enableDataStream sent only when recording starts (not on connect) to preserve pendant battery
+- `lowPower` is the default transcription mode; it captures raw Opus frames to a temp `.opusframes` file and transcribes only after recording stops
+- `live` mode keeps `SFSpeechRecognizer` active during recording and costs noticeably more battery than `lowPower`
 - disableDataStream (realTimeMode=0) sent when recording stops; speculative — verify pendant honors it
 - Incoming audio is protobuf-fragmented; needs reassembly before Opus decode
 - AudioToolbox kAudioFormatOpus has iOS 18 bug (FB15344866) returning 1 sample per call -- must use libopus
@@ -58,7 +68,8 @@ Same format as TokDown macOS -- transcripts are indistinguishable in the archive
 - Swift 6 + CoreBluetooth: @MainActor on CBDelegate class doesn't work -- delegate conformance crosses isolation boundary and non-Sendable params ([String: Any]) trigger "sending risks data races". Keep @unchecked Sendable with queue: nil invariant instead
 - Keychain service name: "tokdown"
 - SFSpeechRecognizer.requestAuthorization callback runs on background queue -- must use nonisolated
-- SFSpeechRecognizer silently degrades after ~1 min continuous audio -- chunked recognition restarts every 45s
+- `bestTranscription.segments` can be empty even when `formattedString` contains transcript text; fall back to formatted text and filter whitespace-only lines to avoid empty `[00:00]` saves
+- SFSpeechRecognizer silently degrades after ~1 min continuous audio -- chunked recognition restarts every 45s of audio, not wall-clock time
 - Opus frames nested 4 levels deep in protobuf: outer field 2 -> inner field 6 -> repeated field 3 -> field 4 (raw Opus)
 - Opus TOC byte from pendant is 0xB8 (CELT-only mono 20ms)
 - Uses @Observable (Observation framework), not ObservableObject -- views use @Environment(Type.self) not @EnvironmentObject
@@ -69,5 +80,6 @@ Same format as TokDown macOS -- transcripts are indistinguishable in the archive
 - BLE writes to pendant must use .withResponse, not .withoutResponse
 - 1-second delays required between subscribe -> timeSync; additional 1s before enableDataStream auto-fires if recording waiting
 - BLE reconnect during recording: completeHandshake() auto-enables streaming if opusFrameContinuation is active
+- BLE reconnect now backs off from 2s up to 30s to reduce idle battery drain when the pendant is unavailable
 - Keychain uses kSecAttrAccessibleWhenUnlockedThisDeviceOnly for PAT storage
 - LimitlessCommand.messageIndex uses OSAllocatedUnfairLock for thread-safe atomic access
