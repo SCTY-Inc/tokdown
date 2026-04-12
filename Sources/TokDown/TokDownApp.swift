@@ -8,7 +8,7 @@ final class SettingsWindowManager {
     private var windowController: NSWindowController?
 
     func show(settingsStore: SettingsStore) {
-        let windowSize = NSSize(width: 380, height: 220)
+        let windowSize = NSSize(width: 420, height: 290)
 
         if windowController == nil {
             let hostingController = NSHostingController(rootView: SettingsWindowView(settingsStore: settingsStore))

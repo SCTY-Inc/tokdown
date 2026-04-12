@@ -4,7 +4,7 @@
 
 **Talk in. Markdown out.**
 
-TokDown is a macOS menu bar app that records system audio and transcribes it to markdown — entirely on-device, using Apple's new [SpeechTranscriber](https://developer.apple.com/documentation/speech/speechtranscriber) API introduced in macOS Tahoe (macOS 26).
+TokDown is a macOS menu bar app that records system audio or microphone input and transcribes it to markdown — entirely on-device, using Apple's new [SpeechTranscriber](https://developer.apple.com/documentation/speech/speechtranscriber) API introduced in macOS Tahoe (macOS 26).
 
 ## Apple's on-device transcription (WWDC 2025, macOS 26 Tahoe)
 
@@ -32,7 +32,7 @@ Quality is comparable to Whisper Large V3 on conversational speech. It handles d
 
 Most transcription tools trap your notes in another app or SaaS dashboard. TokDown writes plain markdown files to a folder — searchable, versionable, and ready to feed into agents, prompts, and automations.
 
-- Record meetings, calls, demos, and research audio from system audio
+- Record meetings, calls, demos, and research audio from system audio or your microphone
 - Get timestamped markdown with YAML front matter (calendar metadata, attendees, links)
 - No audio files kept — transcription in, markdown out, audio deleted
 - No dependencies, no accounts, no API keys
@@ -42,9 +42,10 @@ Most transcription tools trap your notes in another app or SaaS dashboard. TokDo
 
 1. Click the menu bar icon
 2. Pick an upcoming calendar meeting or start recording immediately
-3. Stop when done
-4. TokDown transcribes and saves a `.md` file — typically in under a minute
-5. The audio file is deleted automatically
+3. Open Settings any time to choose whether TokDown records System Audio or Microphone by default
+4. Stop when done
+5. TokDown transcribes and saves a `.md` file — typically in under a minute
+6. The audio file is deleted automatically
 
 Transcripts are saved to `~/Documents/Transcripts/` by default:
 
@@ -125,11 +126,14 @@ bash scripts/build-app.sh release
 2. Unzip and move `TokDown.app` to `/Applications`
 3. Launch — if macOS warns on first run, right-click → **Open**
 
+Open **Settings** from the menu bar to change the save folder and persist the default audio input across relaunches.
+
 ## Permissions
 
 On first launch, macOS will prompt for:
 
-- **Screen Recording** — captures system audio via ScreenCaptureKit
+- **Screen Recording** — captures system audio via ScreenCaptureKit when System Audio is selected
+- **Microphone** — captures live microphone input when Microphone is selected
 - **Speech Recognition** — runs the on-device transcription model
 - **Calendar** (optional) — shows upcoming meetings in the menu
 

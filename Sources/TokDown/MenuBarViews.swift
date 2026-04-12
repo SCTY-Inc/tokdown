@@ -78,6 +78,23 @@ struct SettingsWindowView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 8) {
+                Label("Audio Input", systemImage: "waveform")
+                    .font(.headline)
+
+                Picker("Audio Input", selection: binding(for: \.audioSource)) {
+                    ForEach(AudioSource.allCases) { source in
+                        Text(source.title).tag(source)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text("Choose whether TokDown records system audio or microphone input by default.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
                 Label("Save Folder", systemImage: "folder")
                     .font(.headline)
 
@@ -110,5 +127,15 @@ struct SettingsWindowView: View {
         if panel.runModal() == .OK, let url = panel.url {
             settingsStore.setSaveFolder(url)
         }
+    }
+
+    private func binding<Value>(for keyPath: WritableKeyPath<AppSettings, Value>) -> Binding<Value> {
+        Binding(
+            get: { settingsStore.settings[keyPath: keyPath] },
+            set: { newValue in
+                settingsStore.settings[keyPath: keyPath] = newValue
+                settingsStore.save()
+            }
+        )
     }
 }
