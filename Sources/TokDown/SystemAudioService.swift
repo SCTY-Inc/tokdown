@@ -85,7 +85,7 @@ final class SystemAudioService: NSObject {
         self.isRecording = false
     }
 
-    static func removePartialCaptureFile(at url: URL, fileManager: FileManager = .default) {
+    nonisolated static func removePartialCaptureFile(at url: URL, fileManager: FileManager = .default) {
         guard fileManager.fileExists(atPath: url.path) else { return }
         try? fileManager.removeItem(at: url)
     }
