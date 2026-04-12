@@ -37,17 +37,10 @@ final class MenuBarCoordinator {
     func loadMeetings() async {
         let result = await calendarService.upcomingMeetings(limit: 3)
         upcomingMeetings = result.meetings
-
-        switch result.accessState {
-        case .allowed:
-            if statusMessage == "Calendar access upgrade required to read upcoming meetings." {
-                statusMessage = nil
-            }
-        case .upgradeRequired:
-            statusMessage = "Calendar access upgrade required to read upcoming meetings."
-        case .denied:
-            break
-        }
+        statusMessage = Self.meetingsStatusMessage(
+            for: result.accessState,
+            currentStatusMessage: statusMessage
+        )
     }
 
     // MARK: - Recording
@@ -150,13 +143,8 @@ final class MenuBarCoordinator {
                 fullText: fullText,
                 lines: lines
             )
-            let transcriptURL = storageService.transcriptURL(
-                folderBase: artifacts.transcriptURL.deletingLastPathComponent(),
-                title: document.title,
-                startTime: recordingStartTime
-            )
             do {
-                try storageService.writeTranscript(document.markdown, to: transcriptURL)
+                try storageService.writeTranscript(document.markdown, to: artifacts.transcriptURL)
                 didWriteTranscript = true
             } catch {
                 statusMessage = "Save failed: \(error.localizedDescription)"
@@ -166,14 +154,12 @@ final class MenuBarCoordinator {
         }
 
         let cleanupResult = storageService.deleteFile(audioURL)
-
-        if case let .failed(message) = cleanupResult {
-            statusMessage = didWriteTranscript
-                ? "Saved transcript, but failed to delete audio: \(message)"
-                : "Cleanup failed: \(message)"
-        } else if !transcriptionSucceeded && statusMessage == nil {
-            statusMessage = "Transcription failed. Audio was deleted."
-        }
+        statusMessage = Self.finalStatusMessage(
+            currentStatusMessage: statusMessage,
+            didWriteTranscript: didWriteTranscript,
+            cleanupResult: cleanupResult,
+            transcriptionSucceeded: transcriptionSucceeded
+        )
 
         // Reset
         startTime = nil
@@ -217,4 +203,40 @@ final class MenuBarCoordinator {
             : String(format: "%02d:%02d", m, s)
     }
 
+    nonisolated static func meetingsStatusMessage(
+        for accessState: CalendarService.CalendarReadAccessState,
+        currentStatusMessage: String?
+    ) -> String? {
+        switch accessState {
+        case .allowed:
+            if currentStatusMessage == "Calendar access upgrade required to read upcoming meetings."
+                || currentStatusMessage == "Calendar access denied. Enable Calendar access in System Settings to load upcoming meetings." {
+                return nil
+            }
+            return currentStatusMessage
+        case .upgradeRequired:
+            return "Calendar access upgrade required to read upcoming meetings."
+        case .denied:
+            return "Calendar access denied. Enable Calendar access in System Settings to load upcoming meetings."
+        }
+    }
+
+    nonisolated static func finalStatusMessage(
+        currentStatusMessage: String?,
+        didWriteTranscript: Bool,
+        cleanupResult: FileCleanupResult,
+        transcriptionSucceeded: Bool
+    ) -> String? {
+        switch cleanupResult {
+        case let .failed(message):
+            return didWriteTranscript
+                ? "Saved transcript, but failed to delete audio: \(message)"
+                : "Cleanup failed: \(message)"
+        case .deleted:
+            if !transcriptionSucceeded && currentStatusMessage == nil {
+                return "Transcription failed. Audio was deleted."
+            }
+            return currentStatusMessage
+        }
+    }
 }

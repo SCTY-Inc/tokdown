@@ -13,10 +13,12 @@ final class StorageServiceTests: XCTestCase {
 
         let second = try service.sessionArtifacts(folderBase: folder, title: "Weekly Sync", startTime: startTime)
 
-        XCTAssertEqual(first.audioURL.lastPathComponent, "2026-03-13_14-00_Weekly Sync.m4a")
-        XCTAssertEqual(first.transcriptURL.lastPathComponent, "2026-03-13_14-00_Weekly Sync.md")
-        XCTAssertEqual(second.audioURL.lastPathComponent, "2026-03-13_14-00_Weekly Sync-2.m4a")
-        XCTAssertEqual(second.transcriptURL.lastPathComponent, "2026-03-13_14-00_Weekly Sync-2.md")
+        let prefix = expectedDatePrefix(for: startTime)
+
+        XCTAssertEqual(first.audioURL.lastPathComponent, "\(prefix)_Weekly Sync.m4a")
+        XCTAssertEqual(first.transcriptURL.lastPathComponent, "\(prefix)_Weekly Sync.md")
+        XCTAssertEqual(second.audioURL.lastPathComponent, "\(prefix)_Weekly Sync-2.m4a")
+        XCTAssertEqual(second.transcriptURL.lastPathComponent, "\(prefix)_Weekly Sync-2.md")
     }
 
     func testTranscriptURLAddsSuffixWithoutChangingDateFirstPrefix() throws {
@@ -29,9 +31,11 @@ final class StorageServiceTests: XCTestCase {
 
         let next = service.transcriptURL(folderBase: folder, title: "Recording", startTime: startTime)
 
-        XCTAssertEqual(existing.lastPathComponent, "2026-03-13_14-00_Recording.md")
-        XCTAssertEqual(next.lastPathComponent, "2026-03-13_14-00_Recording-2.md")
-        XCTAssertTrue(next.lastPathComponent.hasPrefix("2026-03-13_14-00_"))
+        let prefix = expectedDatePrefix(for: startTime)
+
+        XCTAssertEqual(existing.lastPathComponent, "\(prefix)_Recording.md")
+        XCTAssertEqual(next.lastPathComponent, "\(prefix)_Recording-2.md")
+        XCTAssertTrue(next.lastPathComponent.hasPrefix("\(prefix)_"))
     }
 
     func testDeleteFileReportsSuccessAndFailure() throws {
@@ -63,5 +67,11 @@ final class StorageServiceTests: XCTestCase {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: value)!
+    }
+
+    private func expectedDatePrefix(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd_HH-mm"
+        return formatter.string(from: date)
     }
 }
