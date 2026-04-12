@@ -147,8 +147,14 @@ final class MenuBarCoordinator {
             statusMessage = "Save failed: missing session artifacts."
         }
 
-        if transcriptionSucceeded && didWriteTranscript {
-            storageService.deleteFile(audioURL)
+        let cleanupResult = storageService.deleteFile(audioURL)
+
+        if case let .failed(message) = cleanupResult {
+            statusMessage = didWriteTranscript
+                ? "Saved transcript, but failed to delete audio: \(message)"
+                : "Cleanup failed: \(message)"
+        } else if !transcriptionSucceeded && statusMessage == nil {
+            statusMessage = "Transcription failed. Audio was deleted."
         }
 
         // Reset
