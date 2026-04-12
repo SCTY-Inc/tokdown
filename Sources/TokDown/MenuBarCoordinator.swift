@@ -22,6 +22,7 @@ final class MenuBarCoordinator {
     private var startTime: Date?
     private var currentMeeting: UpcomingMeeting?
     private var currentArtifacts: SessionArtifacts?
+    private var currentAudioSource: AudioSource?
     private var timerTask: Task<Void, Never>?
 
     var menuTitle: String {
@@ -55,8 +56,9 @@ final class MenuBarCoordinator {
             return
         }
 
-        let label = meeting?.title ?? settingsStore.settings.audioSource.title
-        let useSystemAudio = settingsStore.settings.audioSource == .systemAudio
+        let sessionAudioSource = settingsStore.settings.audioSource
+        let label = meeting?.title ?? sessionAudioSource.title
+        let useSystemAudio = sessionAudioSource == .systemAudio
 
         if !useSystemAudio {
             guard await recordingService.requestMicrophonePermission() else {
@@ -83,6 +85,7 @@ final class MenuBarCoordinator {
             activeTitle = label
             currentMeeting = meeting
             currentArtifacts = artifacts
+            currentAudioSource = sessionAudioSource
             state = .recording
             elapsedSeconds = 0
             startElapsedTimer()
@@ -109,6 +112,7 @@ final class MenuBarCoordinator {
             activeTitle = nil
             currentMeeting = nil
             currentArtifacts = nil
+            currentAudioSource = nil
             state = .idle
             return
         }
@@ -138,7 +142,10 @@ final class MenuBarCoordinator {
                 fallbackTitle: activeTitle,
                 startTime: recordingStartTime,
                 endTime: recordingEndTime,
-                audioSource: settingsStore.settings.audioSource,
+                audioSource: Self.recordingSessionAudioSource(
+                    activeSessionAudioSource: currentAudioSource,
+                    settingsAudioSource: settingsStore.settings.audioSource
+                ),
                 meeting: currentMeeting,
                 fullText: fullText,
                 lines: lines
@@ -166,6 +173,7 @@ final class MenuBarCoordinator {
         activeTitle = nil
         currentMeeting = nil
         currentArtifacts = nil
+        currentAudioSource = nil
         state = .idle
 
         // Refresh meetings after recording
@@ -238,5 +246,12 @@ final class MenuBarCoordinator {
             }
             return currentStatusMessage
         }
+    }
+
+    nonisolated static func recordingSessionAudioSource(
+        activeSessionAudioSource: AudioSource?,
+        settingsAudioSource: AudioSource
+    ) -> AudioSource {
+        activeSessionAudioSource ?? settingsAudioSource
     }
 }

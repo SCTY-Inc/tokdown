@@ -91,4 +91,24 @@ final class MenuBarCoordinatorTests: XCTestCase {
             "Save failed: disk full"
         )
     }
+
+    func testRecordingSessionAudioSourcePrefersCapturedSessionValue() {
+        XCTAssertEqual(
+            MenuBarCoordinator.recordingSessionAudioSource(
+                activeSessionAudioSource: .systemAudio,
+                settingsAudioSource: .microphone
+            ),
+            .systemAudio
+        )
+    }
+
+    func testRecordingSessionAudioSourceFallsBackToCurrentSettingWhenNoSessionValueExists() {
+        XCTAssertEqual(
+            MenuBarCoordinator.recordingSessionAudioSource(
+                activeSessionAudioSource: nil,
+                settingsAudioSource: .microphone
+            ),
+            .microphone
+        )
+    }
 }
