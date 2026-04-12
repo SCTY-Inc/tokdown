@@ -3,6 +3,56 @@ import AVFoundation
 import UIKit
 import Observation
 
+enum TranscriptFrontMatter {
+    static func value(for key: String, in content: String) -> String? {
+        guard let block = block(in: content) else { return nil }
+
+        for line in block.split(separator: "\n", omittingEmptySubsequences: false) {
+            guard let colonIndex = line.firstIndex(of: ":") else { continue }
+            let fieldKey = String(line[..<colonIndex]).trimmingCharacters(in: .whitespaces)
+            guard fieldKey == key else { continue }
+
+            let rawValue = String(line[line.index(after: colonIndex)...])
+                .trimmingCharacters(in: .whitespaces)
+            return decodeScalar(rawValue)
+        }
+
+        return nil
+    }
+
+    private static func block(in content: String) -> Substring? {
+        guard content.hasPrefix("---\n") else { return nil }
+        let start = content.index(content.startIndex, offsetBy: 4)
+        guard let end = content.range(of: "\n---", range: start..<content.endIndex)?.lowerBound else {
+            return nil
+        }
+        return content[start..<end]
+    }
+
+    private static func decodeScalar(_ rawValue: String) -> String {
+        guard rawValue.count >= 2, rawValue.first == "\"", rawValue.last == "\"" else {
+            return rawValue
+        }
+
+        var decoded = ""
+        var isEscaping = false
+        for character in rawValue.dropFirst().dropLast() {
+            if isEscaping {
+                decoded.append(character)
+                isEscaping = false
+            } else if character == "\\" {
+                isEscaping = true
+            } else {
+                decoded.append(character)
+            }
+        }
+        if isEscaping {
+            decoded.append("\\")
+        }
+        return decoded
+    }
+}
+
 /// Orchestrates the full pipeline: BLE audio -> decode -> transcribe -> format -> push.
 ///
 /// States: idle -> recording -> transcribing -> pushing -> idle
@@ -672,8 +722,8 @@ final class SessionManager {
         var loaded: [RecentTranscript] = []
         for file in mdFiles {
             guard let content = try? String(contentsOf: file, encoding: .utf8) else { continue }
-            let title = parseYAMLField("title", from: content) ?? file.deletingPathExtension().lastPathComponent
-            let dateStr = parseYAMLField("recording_started_at", from: content)
+            let title = TranscriptFrontMatter.value(for: "title", in: content) ?? file.deletingPathExtension().lastPathComponent
+            let dateStr = TranscriptFrontMatter.value(for: "recording_started_at", in: content)
             let date = dateStr.flatMap { ISO8601DateFormatter().date(from: $0) } ?? (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date()
 
             loaded.append(RecentTranscript(
@@ -688,13 +738,4 @@ final class SessionManager {
         recentTranscripts = loaded
     }
 
-    private func parseYAMLField(_ key: String, from content: String) -> String? {
-        let pattern = "^\(key):\\s*\"?([^\"\\n]+)\"?"
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: .anchorsMatchLines),
-              let match = regex.firstMatch(in: content, range: NSRange(content.startIndex..., in: content)),
-              let range = Range(match.range(at: 1), in: content) else {
-            return nil
-        }
-        return String(content[range])
-    }
 }

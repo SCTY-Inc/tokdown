@@ -120,19 +120,10 @@ final class TranscriptionService {
             interleaved: true
         )
 
-        lines = []
-        committedLines = []
-        currentChunkLines = []
-        fullText = ""
-        sampleBuffer = []
-        overlapBuffer = []
-        currentChunkSampleCount = 0
-        chunkStartOffset = 0
+        resetTranscriptState()
         finishContinuation = nil
         finishTimeoutTask?.cancel()
         finishTimeoutTask = nil
-        lastNonEmptySnapshot = nil
-        speechResultLogCount = 0
 
         startChunk()
         isTranscribing = true
@@ -161,30 +152,9 @@ final class TranscriptionService {
 
         flushSampleBuffer()
 
-        // If current chunk has very little audio (<2s), don't wait for it
         let minSamplesForResult = Int(sampleRate * 2)
-        if currentChunkSampleCount < minSamplesForResult {
-            // Commit what we have and return immediately.
-            // Preserve the last non-empty live transcript if Speech emits an
-            // empty closing update while the user stops recording.
-            lines = sanitizeTranscriptLines(committedLines + currentChunkLines)
-            fullText = lines.map(\.text).joined(separator: " ")
-            rememberNonEmptySnapshotIfNeeded()
-            let result = snapshotWithFallback()
-            DebugLog.write("finish short chunk fullTextLen=\(result.fullText.count) lines=\(result.lines.count) samples=\(currentChunkSampleCount)")
-            teardown()
-            return result
-        }
-
-        return await withCheckedContinuation { continuation in
-            finishContinuation = continuation
-            finishTimeoutTask?.cancel()
-            finishTimeoutTask = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(8))
-                self?.forceCompleteIfNeeded()
-            }
-            recognitionRequest?.endAudio()
-        }
+        let timeout: Duration = currentChunkSampleCount < minSamplesForResult ? .seconds(2) : .seconds(8)
+        return await finishCurrentRecognition(timeout: timeout)
     }
 
     func transcribeFile(at url: URL, locale: Locale = .current) async -> Snapshot {
@@ -296,8 +266,7 @@ final class TranscriptionService {
     private func restartChunk() {
         guard isTranscribing, finishContinuation == nil else { return }
 
-        // Commit current chunk's lines
-        committedLines = sanitizeTranscriptLines(committedLines + currentChunkLines)
+        committedLines = sanitizeTranscriptLines(mergedTranscriptLines(committedLines, with: currentChunkLines))
         currentChunkLines = []
 
         // Update offset for the next chunk based on audio duration, not wall time.
@@ -448,9 +417,7 @@ final class TranscriptionService {
     }
 
     private func completeIfNeeded() {
-        lines = sanitizeTranscriptLines(committedLines + currentChunkLines)
-        deduplicateChunkBoundaries()
-        lines = sanitizeTranscriptLines(lines)
+        lines = sanitizeTranscriptLines(mergedTranscriptLines(committedLines, with: currentChunkLines))
         fullText = lines.map(\.text).joined(separator: " ")
         rememberNonEmptySnapshotIfNeeded()
 
@@ -465,7 +432,22 @@ final class TranscriptionService {
         continuation?.resume(returning: result)
     }
 
+    private func finishCurrentRecognition(timeout: Duration) async -> Snapshot {
+        await withCheckedContinuation { continuation in
+            finishContinuation = continuation
+            finishTimeoutTask?.cancel()
+            finishTimeoutTask = Task { [weak self] in
+                try? await Task.sleep(for: timeout)
+                self?.forceCompleteIfNeeded()
+            }
+            recognitionRequest?.endAudio()
+        }
+    }
+
     private func teardown() {
+        finishTimeoutTask?.cancel()
+        finishTimeoutTask = nil
+        finishContinuation = nil
         recognitionRequest = nil
         recognitionTask?.cancel()
         recognitionTask = nil
@@ -473,13 +455,7 @@ final class TranscriptionService {
         recognizer = nil
         audioFormat = nil
         isTranscribing = false
-        sampleBuffer = []
-        overlapBuffer = []
-        lines = []
-        committedLines = []
-        currentChunkLines = []
-        chunkStartOffset = 0
-        currentChunkSampleCount = 0
+        resetTranscriptState()
         isRecognizerAvailable = true
     }
 
@@ -492,7 +468,7 @@ final class TranscriptionService {
     }
 
     private func updateMergedTranscript(formattedFallback: String? = nil) {
-        lines = sanitizeTranscriptLines(committedLines + currentChunkLines)
+        lines = sanitizeTranscriptLines(mergedTranscriptLines(committedLines, with: currentChunkLines))
         let mergedText = lines.map(\.text).joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if !mergedText.isEmpty {
@@ -503,6 +479,19 @@ final class TranscriptionService {
             fullText = ""
         }
         rememberNonEmptySnapshotIfNeeded()
+    }
+
+    private func resetTranscriptState() {
+        lines = []
+        committedLines = []
+        currentChunkLines = []
+        fullText = ""
+        sampleBuffer = []
+        overlapBuffer = []
+        chunkStartOffset = 0
+        currentChunkSampleCount = 0
+        lastNonEmptySnapshot = nil
+        speechResultLogCount = 0
     }
 
     private func sanitizeTranscriptLines(_ lines: [TranscriptLine]) -> [TranscriptLine] {
@@ -566,45 +555,23 @@ final class TranscriptionService {
         return configuration
     }
 
-    // MARK: - Chunk Boundary Deduplication
+    private func mergedTranscriptLines(_ existing: [TranscriptLine], with incoming: [TranscriptLine]) -> [TranscriptLine] {
+        guard !existing.isEmpty else { return incoming }
+        guard !incoming.isEmpty else { return existing }
 
-    /// Remove duplicate words at chunk boundaries caused by audio overlap.
-    /// Compares last N words of one chunk with first N words of the next.
-    private func deduplicateChunkBoundaries() {
-        guard lines.count > 1 else { return }
-
-        var result: [TranscriptLine] = [lines[0]]
-        let words = 5 // compare window
-
-        for i in 1..<lines.count {
-            let prev = result.last?.text.lowercased().split(separator: " ").suffix(words) ?? []
-            let curr = lines[i].text.lowercased().split(separator: " ")
-
-            // Check if current line starts with words that match the end of previous line
-            if !prev.isEmpty, !curr.isEmpty {
-                var overlapLen = 0
-                for len in (1...min(prev.count, curr.count)).reversed() {
-                    if Array(prev.suffix(len)) == Array(curr.prefix(len)) {
-                        overlapLen = len
-                        break
-                    }
-                }
-
-                if overlapLen > 0 {
-                    // Trim the overlapping prefix from current line
-                    let trimmedWords = lines[i].text.split(separator: " ").dropFirst(overlapLen)
-                    if trimmedWords.isEmpty { continue } // entire line was duplicate
-                    result.append(TranscriptLine(
-                        timestamp: lines[i].timestamp,
-                        text: trimmedWords.joined(separator: " ")
-                    ))
-                    continue
-                }
+        let maxOverlap = min(5, existing.count, incoming.count)
+        for overlap in stride(from: maxOverlap, through: 2, by: -1) {
+            let existingSuffix = existing.suffix(overlap).map { normalizedBoundaryText($0.text) }
+            let incomingPrefix = incoming.prefix(overlap).map { normalizedBoundaryText($0.text) }
+            if existingSuffix == incomingPrefix {
+                return existing + incoming.dropFirst(overlap)
             }
-
-            result.append(lines[i])
         }
 
-        lines = result
+        return existing + incoming
+    }
+
+    private func normalizedBoundaryText(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 }

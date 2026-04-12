@@ -17,6 +17,7 @@ final class PushQueue {
         let basePath: String
         let createdAt: Date
         var retryCount: Int = 0
+        var lastError: String? = nil
     }
 
     private(set) var pendingCount = 0
@@ -32,6 +33,7 @@ final class PushQueue {
     private let pushOperation: (@Sendable (PendingPush) async throws -> Void)?
     private var currentPath: NWPath?
     private var isDraining = false
+    private var needsDrainAfterCurrentRun = false
     private var batteryObserver: NSObjectProtocol?
 
     private var queueURL: URL? {
@@ -77,12 +79,20 @@ final class PushQueue {
         pendingCount = queue.count
         saveQueue()
         PerformanceTrace.emitEvent("PushQueueEnqueue", detail: "count=\(queue.count)")
-        drain()
+        if isDraining {
+            needsDrainAfterCurrentRun = true
+        } else {
+            drain()
+        }
     }
 
     /// Attempt to push all queued items.
     func drain() {
-        guard !isDraining, !queue.isEmpty else { return }
+        guard !queue.isEmpty else { return }
+        guard !isDraining else {
+            needsDrainAfterCurrentRun = true
+            return
+        }
         guard canDrainNow else {
             PerformanceTrace.emitEvent("PushQueueDeferred", detail: deferredReason)
             return
@@ -94,18 +104,19 @@ final class PushQueue {
             guard let self else { return }
 
             defer {
+                let shouldRedrain = self.needsDrainAfterCurrentRun
+                self.needsDrainAfterCurrentRun = false
                 self.pendingCount = self.queue.count
                 self.saveQueue()
                 self.isDraining = false
                 PerformanceTrace.endInterval("PushQueueDrain", state: signpost, detail: "remaining=\(self.queue.count)")
 
-                if !self.queue.isEmpty, self.canDrainNow {
+                if shouldRedrain, !self.queue.isEmpty, self.canDrainNow {
                     self.drain()
                 }
             }
 
             let initialIDs = self.queue.map(\.id)
-            var retries: [PendingPush] = []
 
             for id in initialIDs {
                 guard self.canDrainNow else {
@@ -119,16 +130,18 @@ final class PushQueue {
                     self.removePendingPush(id: id)
                     self.onPushSuccess?(item)
                 } catch {
-                    self.removePendingPush(id: id)
-                    var retry = item
-                    retry.retryCount += 1
-                    if retry.retryCount < 10 {
-                        retries.append(retry)
+                    let isRetryable = self.isRetryable(error)
+                    self.updatePendingPush(id: id) { pending in
+                        pending.lastError = error.localizedDescription
+                        if isRetryable {
+                            pending.retryCount += 1
+                        }
+                    }
+                    if isRetryable {
+                        break
                     }
                 }
             }
-
-            self.queue.append(contentsOf: retries)
         }
     }
 
@@ -237,5 +250,17 @@ final class PushQueue {
     private func removePendingPush(id: UUID) {
         guard let index = queue.firstIndex(where: { $0.id == id }) else { return }
         queue.remove(at: index)
+    }
+
+    private func updatePendingPush(id: UUID, update: (inout PendingPush) -> Void) {
+        guard let index = queue.firstIndex(where: { $0.id == id }) else { return }
+        update(&queue[index])
+    }
+
+    private func isRetryable(_ error: Error) -> Bool {
+        guard let syncError = error as? GitHubSync.SyncError else {
+            return true
+        }
+        return syncError.isRetryable
     }
 }

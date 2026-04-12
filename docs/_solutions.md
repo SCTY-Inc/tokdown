@@ -1,5 +1,10 @@
 # Solutions Log
 
+## 2026-04-12: Transcript save/sync edge cases could overwrite, mislabel, or silently discard work
+**Problem**: Several normal-path failures could corrupt transcript handling: malformed protobuf notifications could crash decode, same-minute recordings could overwrite each other locally/remotely, deferred transcription timeouts could reuse the previous recording's text, short live tails could be dropped before finalization, and permanent GitHub failures could disappear after exhausting retry budget.
+**Root cause**: Multiple components assumed happy-path inputs or treated all failures the same. `Protobuf.decode()` computed length-delimited end indexes before proving bounds, transcript filenames only used minute precision, file transcription teardown kept stale fallback state alive, live finalization skipped `endAudio()` for short chunks, and `PushQueue` incremented retries for every failure class.
+**Fix**: Made protobuf parsing fail closed, tightened fragment reassembly validation, switched transcript filenames to `yyyy-MM-dd_HH-mm-ss-SSS_Title.md`, reset prerecorded transcription state before each run, finalize short live chunks with a brief `endAudio()` wait, restrict overlap removal to chunk-boundary merges, keep permanent GitHub failures queued with `lastError`, percent-encode GitHub Contents API path segments, parse escaped quotes from saved front matter, and use `eventIdentifier` as the stable calendar row ID.
+
 ## 2026-04-11: PushQueue dropped new transcripts enqueued during an in-flight drain
 **Problem**: If TokDown queued another transcript while a GitHub push was already awaiting the network, the later item could disappear from the queue.
 **Root cause**: `PushQueue.drain()` iterated a snapshot of `queue`, awaited per-item network work, then replaced the entire queue with a `remaining` array. Items appended mid-drain were never in that snapshot and got overwritten.

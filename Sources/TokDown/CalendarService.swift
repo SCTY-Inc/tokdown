@@ -8,8 +8,8 @@ import Observation
 final class CalendarService {
 
     struct Meeting: Identifiable, Sendable {
-        let id = UUID()
         let eventIdentifier: String
+        var id: String { eventIdentifier }
         let title: String
         let startDate: Date
         let endDate: Date

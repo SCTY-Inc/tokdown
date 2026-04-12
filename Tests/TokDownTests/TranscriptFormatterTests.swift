@@ -193,7 +193,30 @@ struct TranscriptFormatterTests {
         #expect(doc.filename.hasSuffix("_Pendant-Recording.md"))
     }
 
-    @Test("Filename uses YYYY-MM-DD_HH-mm prefix in the formatter's time zone")
+    @Test("Recordings started in the same minute still get distinct filenames")
+    func filenamesDisambiguateWithinTheSameMinute() throws {
+        let formatter = Self.makeFormatter()
+        let first = formatter.makeDocument(
+            title: "Quick Note",
+            startTime: Self.fixedStart,
+            endTime: Self.fixedEnd,
+            meeting: nil,
+            fullText: "",
+            lines: []
+        )
+        let second = formatter.makeDocument(
+            title: "Quick Note",
+            startTime: Self.fixedStart.addingTimeInterval(0.123),
+            endTime: Self.fixedEnd.addingTimeInterval(0.123),
+            meeting: nil,
+            fullText: "",
+            lines: []
+        )
+
+        #expect(first.filename != second.filename)
+    }
+
+    @Test("Filename uses a sub-minute timestamp prefix in the formatter's time zone")
     func filenameHasDatePrefix() throws {
         let doc = Self.makeFormatter().makeDocument(
             title: "Quick Note",
@@ -204,8 +227,7 @@ struct TranscriptFormatterTests {
             lines: []
         )
 
-        // 2026-04-11T10:30:00Z → "2026-04-11_10-30" in UTC
-        #expect(doc.filename == "2026-04-11_10-30_Quick-Note.md")
+        #expect(doc.filename == "2026-04-11_10-30-00-000_Quick-Note.md")
     }
 
     @Test("Very long title truncates to 60 characters in filename only")
@@ -222,7 +244,7 @@ struct TranscriptFormatterTests {
 
         // Filename portion between last "_" and ".md"
         let namePart = doc.filename
-            .replacingOccurrences(of: "2026-04-11_10-30_", with: "")
+            .replacingOccurrences(of: "2026-04-11_10-30-00-000_", with: "")
             .replacingOccurrences(of: ".md", with: "")
         #expect(namePart.count == 60)
         // Full title still present in body heading (no truncation there)
@@ -305,7 +327,21 @@ struct TranscriptFormatterTests {
             lines: []
         )
 
-        // YAML front matter should contain escaped quotes: \"
         #expect(doc.markdown.contains(#"title: "She said \"hello\"""#))
+    }
+
+    @Test("Front matter parser round-trips escaped quotes")
+    func frontMatterParserRoundTripsEscapedQuotes() throws {
+        let doc = Self.makeFormatter().makeDocument(
+            title: #"She said "hello""#,
+            startTime: Self.fixedStart,
+            endTime: Self.fixedEnd,
+            meeting: nil,
+            fullText: "",
+            lines: []
+        )
+
+        #expect(TranscriptFrontMatter.value(for: "title", in: doc.markdown) == #"She said "hello""#)
+        #expect(TranscriptFrontMatter.value(for: "recording_started_at", in: doc.markdown) == "2026-04-11T10:30:00Z")
     }
 }

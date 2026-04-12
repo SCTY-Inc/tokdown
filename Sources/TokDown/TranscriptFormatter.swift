@@ -144,19 +144,20 @@ struct TranscriptFormatter {
 
     // MARK: - Filename
 
-    /// Generate date-first filename: YYYY-MM-DD_HH-mm_Title.md
+    /// Generate date-first filename: YYYY-MM-DD_HH-mm-ss-SSS_Title.md
     private func makeFilename(title: String, date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = timeZone
-        formatter.dateFormat = "yyyy-MM-dd_HH-mm"
+        formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss-SSS"
 
         let datePart = formatter.string(from: date)
         let safeName = title
             .replacingOccurrences(of: "[^a-zA-Z0-9 ]", with: "", options: .regularExpression)
             .replacingOccurrences(of: " +", with: "-", options: .regularExpression)
             .prefix(60)
-        return "\(datePart)_\(safeName).md"
+        let filenameTitle = safeName.isEmpty ? "Pendant-Recording" : String(safeName)
+        return "\(datePart)_\(filenameTitle).md"
     }
 
     // MARK: - Helpers

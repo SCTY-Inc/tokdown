@@ -33,9 +33,9 @@ Key files:
 - `PCMRenderFile.swift` -- renders deferred PCM audio to a local `.caf` file for `SFSpeechURLRecognitionRequest`
 - `SpeechLanguageModelCache.swift` -- builds and caches custom Speech language models from contextual phrases when available
 - `PendantBLE.swift` -- CoreBluetooth manager, retrieve-known reconnect path, filtered scan/service discovery, reconnect backoff
-- `TranscriptionService.swift` -- chunked live transcription + file-based deferred transcription, on-device checks, custom vocabulary prewarm
-- `SessionManager.swift` -- pipeline orchestrator; chooses live vs deferred transcription path and collects contextual vocabulary from meetings
-- `PushQueue.swift` -- offline retry queue with push timing policies (immediate / Wi‑Fi / charging)
+- `TranscriptionService.swift` -- chunked live transcription + file-based deferred transcription, on-device checks, custom vocabulary prewarm, short-tail finalization, boundary-only chunk overlap merging
+- `SessionManager.swift` -- pipeline orchestrator; chooses live vs deferred transcription path, collects contextual vocabulary from meetings, reloads saved front matter with escaped-quote-safe parsing
+- `PushQueue.swift` -- offline retry queue with push timing policies (immediate / Wi‑Fi / charging) and retryable-vs-permanent GitHub failure handling
 - `MetricsCollector.swift` + `PerformanceTrace.swift` -- MetricKit payload capture and signpost instrumentation
 - `TranscriptFormatter.swift` -- YAML front matter + timestamped markdown
 - `DebugLog.swift` -- writes to Documents/debug.log for on-device diagnostics
@@ -51,7 +51,7 @@ Key files:
 - Pendant advertises as "Pendant" (not "Friend" or "Omi")
 
 ## Output
-Markdown transcripts pushed to a configurable GitHub repo (set in Settings) at `{path}/YYYY-MM-DD_HH-mm_Title.md`.
+Markdown transcripts pushed to a configurable GitHub repo (set in Settings) at `{path}/YYYY-MM-DD_HH-mm-ss-SSS_Title.md`.
 YAML front matter with `audio_source: "limitless_pendant"`, `source: "pendant_ambient"` or `"pendant_meeting"`.
 Same format as TokDown macOS -- transcripts are indistinguishable in the archive.
 
@@ -67,6 +67,7 @@ Same format as TokDown macOS -- transcripts are indistinguishable in the archive
 - `live` mode keeps `SFSpeechRecognizer` active during recording and costs noticeably more battery than `lowPower`
 - disableDataStream (realTimeMode=0) sent when recording stops; speculative — verify pendant honors it
 - Incoming audio is protobuf-fragmented; needs reassembly before Opus decode
+- Protobuf decode must fail closed on malformed/truncated length-delimited fields; don't compute end offsets before proving enough remaining bytes
 - AudioToolbox kAudioFormatOpus has iOS 18 bug (FB15344866) returning 1 sample per call -- must use libopus
 - Code signing required for BLE, Speech, and Calendar permissions
 - Swift 6 concurrency: actor isolation rules apply; closures in @MainActor contexts inherit isolation
@@ -75,6 +76,9 @@ Same format as TokDown macOS -- transcripts are indistinguishable in the archive
 - SFSpeechRecognizer.requestAuthorization callback runs on background queue -- must use nonisolated
 - On-device recognition should be gated with `supportsOnDeviceRecognition`; TokDown now fails closed instead of silently allowing off-device recognition
 - `bestTranscription.segments` can be empty even when `formattedString` contains transcript text; fall back to formatted text and filter whitespace-only lines to avoid empty `[00:00]` saves
+- File transcription must clear `fullText` and `lastNonEmptySnapshot` before each new prerecorded-audio run so timeout/error fallback can't leak the previous recording into the next save
+- Short live chunks still need `endAudio()` and a brief finalization wait; returning early drops exactly the short tails most likely to need final recognition
+- Chunk overlap dedupe should happen only at chunk boundaries; don't compare adjacent segment tokens or you'll delete legitimate repetitions like "very very"
 - Live SFSpeechRecognizer silently degrades after ~1 min continuous audio -- chunked recognition restarts every 45s of audio, not wall-clock time
 - Opus frames nested 4 levels deep in protobuf: outer field 2 -> inner field 6 -> repeated field 3 -> field 4 (raw Opus)
 - Opus TOC byte from pendant is 0xB8 (CELT-only mono 20ms)
@@ -91,6 +95,10 @@ Same format as TokDown macOS -- transcripts are indistinguishable in the archive
 - BLE reconnect now backs off from 2s up to 30s to reduce idle battery drain when the pendant is unavailable
 - PushQueue can defer GitHub sync until Wi‑Fi or charging; use `Push timing` in Settings for larger archives / better battery
 - PushQueue drains by item ID now; don't overwrite the full queue after awaited network work or you'll lose transcripts enqueued mid-drain
+- Permanent GitHub sync failures (missing PAT/repo, non-retryable 4xxs) should stay queued with a visible error instead of burning retry budget and disappearing
+- Build GitHub Contents API URLs by encoding each repo path segment; don't interpolate raw `basePath` / `filename` into the URL string
 - MetricKit + signposts are wired for measuring battery regressions instead of guessing
 - Keychain uses kSecAttrAccessibleWhenUnlockedThisDeviceOnly for PAT storage
 - LimitlessCommand.messageIndex uses OSAllocatedUnfairLock for thread-safe atomic access
+- `FragmentReassembler` should reject out-of-range `fragmentSeq` values and only assemble when the fragment key set is exactly `0..<totalFragments`
+- `CalendarService.Meeting.id` should use EventKit's `eventIdentifier`, not a fresh UUID on each refresh, to keep SwiftUI diffing stable

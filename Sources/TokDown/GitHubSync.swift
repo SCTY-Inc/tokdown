@@ -6,12 +6,38 @@ import Security
 /// Auth: Bearer {PAT} from Keychain (service: "tokdown")
 actor GitHubSync {
 
-    enum SyncError: Error, Sendable {
+    enum SyncError: Error, Sendable, LocalizedError {
         case missingPAT
         case missingRepo
         case encodingFailed
         case httpError(statusCode: Int, message: String)
         case networkError(Error)
+
+        var isRetryable: Bool {
+            switch self {
+            case .networkError:
+                true
+            case .httpError(let statusCode, _):
+                statusCode == 408 || statusCode == 409 || statusCode == 425 || statusCode == 429 || (500...599).contains(statusCode)
+            case .missingPAT, .missingRepo, .encodingFailed:
+                false
+            }
+        }
+
+        var errorDescription: String? {
+            switch self {
+            case .missingPAT:
+                "GitHub personal access token is missing"
+            case .missingRepo:
+                "GitHub repository is missing"
+            case .encodingFailed:
+                "Couldn't encode the GitHub request"
+            case .httpError(let statusCode, let message):
+                "GitHub API error (\(statusCode)): \(message)"
+            case .networkError(let error):
+                "GitHub network error: \(error.localizedDescription)"
+            }
+        }
     }
 
     private static let keychainService = "tokdown"
@@ -48,8 +74,7 @@ actor GitHubSync {
 
         let existingSHA = try await checkExisting(filename: filename, repo: repo, basePath: basePath, pat: pat)
 
-        let urlString = "https://api.github.com/repos/\(repo)/contents/\(basePath)/\(filename)"
-        guard let url = URL(string: urlString) else {
+        guard let url = Self.contentsURL(repo: repo, basePath: basePath, filename: filename) else {
             throw SyncError.encodingFailed
         }
 
@@ -96,8 +121,7 @@ actor GitHubSync {
     /// - Parameter filename: File name within basePath
     /// - Returns: The file's SHA if it exists, nil otherwise
     private func checkExisting(filename: String, repo: String, basePath: String, pat: String) async throws -> String? {
-        let urlString = "https://api.github.com/repos/\(repo)/contents/\(basePath)/\(filename)"
-        guard let url = URL(string: urlString) else { return nil }
+        guard let url = Self.contentsURL(repo: repo, basePath: basePath, filename: filename) else { return nil }
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -128,6 +152,24 @@ actor GitHubSync {
         }
 
         return nil
+    }
+
+    static func contentsURL(repo: String, basePath: String, filename: String) -> URL? {
+        let repoSegments = repo.split(separator: "/").map(String.init)
+        guard repoSegments.count == 2, var url = URL(string: "https://api.github.com/repos") else {
+            return nil
+        }
+
+        for segment in repoSegments {
+            url.appendPathComponent(segment)
+        }
+        url.appendPathComponent("contents")
+
+        for segment in basePath.split(separator: "/").map(String.init) {
+            url.appendPathComponent(segment)
+        }
+        url.appendPathComponent(filename)
+        return url
     }
 
     // MARK: - Keychain

@@ -46,28 +46,40 @@ enum Protobuf {
         var fields: [Field] = []
         var offset = data.startIndex
         while offset < data.endIndex {
-            guard let (tag, nextOffset) = readVarint(data, from: offset) else { break }
-            offset = nextOffset
-            let wireType = Int(tag & 0x07)
-            let fieldNumber = Int(tag >> 3)
-
-            switch wireType {
-            case 0: // varint
-                guard let (value, next) = readVarint(data, from: offset) else { break }
-                fields.append(Field(number: fieldNumber, wireType: wireType, varintValue: value, bytesValue: Data()))
-                offset = next
-            case 2: // length-delimited
-                guard let (length, next) = readVarint(data, from: offset) else { break }
-                let end = data.index(next, offsetBy: Int(length))
-                guard end <= data.endIndex else { break }
-                fields.append(Field(number: fieldNumber, wireType: wireType, varintValue: 0, bytesValue: data[next..<end]))
-                offset = end
-            default:
-                // Skip unknown wire types (fixed32/64 etc)
-                return fields
+            guard let (field, nextOffset) = readField(data, from: offset) else {
+                return []
             }
+            fields.append(field)
+            offset = nextOffset
         }
         return fields
+    }
+
+    private static func readField(_ data: Data, from offset: Data.Index) -> (Field, Data.Index)? {
+        guard let (tag, valueOffset) = readVarint(data, from: offset) else { return nil }
+        let wireType = Int(tag & 0x07)
+        let fieldNumber = Int(tag >> 3)
+
+        switch wireType {
+        case 0:
+            guard let (value, nextOffset) = readVarint(data, from: valueOffset) else { return nil }
+            return (Field(number: fieldNumber, wireType: wireType, varintValue: value, bytesValue: Data()), nextOffset)
+        case 2:
+            guard let (bytes, nextOffset) = readLengthDelimited(data, from: valueOffset) else { return nil }
+            return (Field(number: fieldNumber, wireType: wireType, varintValue: 0, bytesValue: bytes), nextOffset)
+        default:
+            return nil
+        }
+    }
+
+    private static func readLengthDelimited(_ data: Data, from offset: Data.Index) -> (Data, Data.Index)? {
+        guard let (length, valueOffset) = readVarint(data, from: offset) else { return nil }
+        let remainingBytes = data.distance(from: valueOffset, to: data.endIndex)
+        guard length <= UInt64(remainingBytes),
+              let endOffset = data.index(valueOffset, offsetBy: Int(length), limitedBy: data.endIndex) else {
+            return nil
+        }
+        return (Data(data[valueOffset..<endOffset]), endOffset)
     }
 
     private static func readVarint(_ data: Data, from offset: Data.Index) -> (UInt64, Data.Index)? {
@@ -166,55 +178,66 @@ final class FragmentReassembler {
     func process(notification data: Data) -> Data? {
         let fields = Protobuf.decode(data)
 
-        var messageIndex: UInt64 = 0
-        var fragmentSeq: UInt64 = 0
-        var totalFragments: UInt64 = 1
-        var payload = Data()
+        var messageIndex: UInt64?
+        var fragmentSeq: Int?
+        var totalFragments: Int?
+        var payload: Data?
 
         for field in fields {
             switch field.number {
             case 1: messageIndex = field.varintValue
-            case 2: fragmentSeq = field.varintValue
-            case 3: totalFragments = field.varintValue
+            case 2: fragmentSeq = Int(field.varintValue)
+            case 3: totalFragments = Int(field.varintValue)
             case 4: payload = field.bytesValue
             default: break
             }
         }
 
-        guard totalFragments > 0 else { return nil }
+        guard let messageIndex,
+              let fragmentSeq,
+              let totalFragments,
+              let payload,
+              totalFragments > 0,
+              fragmentSeq >= 0,
+              fragmentSeq < totalFragments else {
+            return nil
+        }
 
-        // Single fragment — return immediately
         if totalFragments == 1 {
             return payload
         }
 
-        // Multi-fragment — buffer and reassemble
-        if pending[messageIndex] == nil {
-            pending[messageIndex] = PendingMessage(totalFragments: Int(totalFragments))
+        if let existing = pending[messageIndex], existing.totalFragments != totalFragments {
+            pending.removeValue(forKey: messageIndex)
         }
-        pending[messageIndex]?.fragments[Int(fragmentSeq)] = payload
 
-        guard let msg = pending[messageIndex],
-              msg.fragments.count == msg.totalFragments else {
-            // Evict stale entries (older than 5s)
-            let cutoff = Date().addingTimeInterval(-5)
-            pending = pending.filter { $0.value.createdAt > cutoff }
+        var message = pending[messageIndex] ?? PendingMessage(totalFragments: totalFragments)
+        guard message.totalFragments == totalFragments else { return nil }
+        message.fragments[fragmentSeq] = payload
+        pending[messageIndex] = message
+
+        let expectedFragments = Set(0..<message.totalFragments)
+        guard Set(message.fragments.keys) == expectedFragments else {
+            evictStaleMessages()
             return nil
         }
 
-        // Reassemble in order
         pending.removeValue(forKey: messageIndex)
         var assembled = Data()
-        for i in 0..<msg.totalFragments {
-            if let fragment = msg.fragments[i] {
-                assembled.append(fragment)
-            }
+        for index in 0..<message.totalFragments {
+            guard let fragment = message.fragments[index] else { return nil }
+            assembled.append(fragment)
         }
         return assembled
     }
 
     func reset() {
         pending.removeAll()
+    }
+
+    private func evictStaleMessages() {
+        let cutoff = Date().addingTimeInterval(-5)
+        pending = pending.filter { $0.value.createdAt > cutoff }
     }
 }
 
