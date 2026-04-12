@@ -37,6 +37,17 @@ final class MenuBarCoordinator {
     func loadMeetings() async {
         let result = await calendarService.upcomingMeetings(limit: 3)
         upcomingMeetings = result.meetings
+
+        switch result.accessState {
+        case .allowed:
+            if statusMessage == "Calendar access upgrade required to read upcoming meetings." {
+                statusMessage = nil
+            }
+        case .upgradeRequired:
+            statusMessage = "Calendar access upgrade required to read upcoming meetings."
+        case .denied:
+            break
+        }
     }
 
     // MARK: - Recording

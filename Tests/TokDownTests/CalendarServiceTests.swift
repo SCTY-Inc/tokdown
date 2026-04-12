@@ -2,6 +2,24 @@ import XCTest
 @testable import TokDown
 
 final class CalendarServiceTests: XCTestCase {
+    func testReadAccessStateAllowsReadCapableStatuses() {
+        XCTAssertEqual(CalendarService.readAccessState(for: .fullAccess), .allowed)
+        XCTAssertEqual(CalendarService.readAccessState(for: .authorized), .allowed)
+    }
+
+    func testReadAccessStateRequiresUpgradeForWriteOnly() {
+        XCTAssertEqual(CalendarService.readAccessState(for: .writeOnly), .upgradeRequired)
+    }
+
+    func testReadAccessStateDeniesRestrictedAndDeniedStatuses() {
+        XCTAssertEqual(CalendarService.readAccessState(for: .denied), .denied)
+        XCTAssertEqual(CalendarService.readAccessState(for: .restricted), .denied)
+    }
+
+    func testReadAccessStateReturnsNilForNotDeterminedToTriggerRequestFlow() {
+        XCTAssertNil(CalendarService.readAccessState(for: .notDetermined))
+    }
+
     func testSelectUpcomingMeetingsPicksNextThreeAcrossWiderWindow() {
         let now = date("2026-03-13T00:15:00Z")
         let meetings = [
