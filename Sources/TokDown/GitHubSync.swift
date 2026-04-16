@@ -11,6 +11,7 @@ actor GitHubSync {
         case missingRepo
         case encodingFailed
         case httpError(statusCode: Int, message: String)
+        case rateLimited(retryAfter: TimeInterval)
         case networkError(Error)
 
         var isRetryable: Bool {
@@ -18,10 +19,19 @@ actor GitHubSync {
             case .networkError:
                 true
             case .httpError(let statusCode, _):
-                statusCode == 408 || statusCode == 409 || statusCode == 425 || statusCode == 429 || (500...599).contains(statusCode)
+                statusCode == 408 || statusCode == 409 || statusCode == 425 || (500...599).contains(statusCode)
+            case .rateLimited:
+                false  // handled specially by PushQueue with a retryAfter date
             case .missingPAT, .missingRepo, .encodingFailed:
                 false
             }
+        }
+
+        var isCredentialError: Bool {
+            if case .httpError(let statusCode, _) = self {
+                return statusCode == 401 || statusCode == 403
+            }
+            return false
         }
 
         var errorDescription: String? {
@@ -34,6 +44,8 @@ actor GitHubSync {
                 "Couldn't encode the GitHub request"
             case .httpError(let statusCode, let message):
                 "GitHub API error (\(statusCode)): \(message)"
+            case .rateLimited(let after):
+                "GitHub rate limit — retry in \(Int(after))s"
             case .networkError(let error):
                 "GitHub network error: \(error.localizedDescription)"
             }
@@ -42,6 +54,12 @@ actor GitHubSync {
 
     private static let keychainService = "tokdown"
     private static let keychainAccount = "github-pat"
+
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 20
+        return URLSession(configuration: config)
+    }()
 
     /// Push a transcript markdown file to GitHub.
     /// - Parameters:
@@ -96,7 +114,7 @@ actor GitHubSync {
 
         let (data, response): (Data, URLResponse)
         do {
-            (data, response) = try await URLSession.shared.data(for: request)
+            (data, response) = try await Self.session.data(for: request)
         } catch {
             PerformanceTrace.emitEvent("GitHubPushFailure", detail: filename)
             DebugLog.write("GitHub push network error file=\(filename) error=\(error.localizedDescription)")
@@ -105,6 +123,12 @@ actor GitHubSync {
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw SyncError.httpError(statusCode: 0, message: "Not an HTTP response")
+        }
+
+        if httpResponse.statusCode == 429 {
+            let retryAfter = parseRetryAfter(from: httpResponse)
+            DebugLog.write("GitHub push rate limited file=\(filename) retryAfter=\(Int(retryAfter))s")
+            throw SyncError.rateLimited(retryAfter: retryAfter)
         }
 
         guard (200...299).contains(httpResponse.statusCode) else {
@@ -131,7 +155,7 @@ actor GitHubSync {
 
         let (data, response): (Data, URLResponse)
         do {
-            (data, response) = try await URLSession.shared.data(for: request)
+            (data, response) = try await Self.session.data(for: request)
         } catch {
             throw SyncError.networkError(error)
         }
@@ -172,6 +196,16 @@ actor GitHubSync {
         return url
     }
 
+    // MARK: - Helpers
+
+    private func parseRetryAfter(from response: HTTPURLResponse) -> TimeInterval {
+        if let value = response.value(forHTTPHeaderField: "Retry-After"),
+           let seconds = TimeInterval(value) {
+            return min(max(seconds, 1), 3600)
+        }
+        return 60
+    }
+
     // MARK: - Keychain
 
     /// Load GitHub PAT from Keychain.
@@ -180,7 +214,6 @@ actor GitHubSync {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: Self.keychainService,
             kSecAttrAccount as String: Self.keychainAccount,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]

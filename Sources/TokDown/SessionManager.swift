@@ -101,6 +101,8 @@ final class SessionManager {
     var recordingDuration: TimeInterval = 0
     var lastError: String?
     var recentTranscripts: [RecentTranscript] = []
+    /// Frames received from the pendant in the last elapsed second (updated every second).
+    var frameRate: Double = 0
 
     var transcriptionMode: TranscriptionMode {
         activeTranscriptionMode ?? settings.transcriptionMode
@@ -228,6 +230,8 @@ final class SessionManager {
             Task { @MainActor [weak self] in
                 guard let self, let start = self.recordingStart else { return }
                 self.recordingDuration = Date().timeIntervalSince(start)
+                self.frameRate = Double(self.framesThisSecond)
+                self.framesThisSecond = 0
             }
         }
     }
@@ -323,8 +327,10 @@ final class SessionManager {
 
     private var decodedFrameCount = 0
     private var decodeFailCount = 0
+    private var framesThisSecond = 0
 
     private func processOpusFrame(_ frame: Data) {
+        framesThisSecond += 1
         switch transcriptionMode {
         case .live:
             guard let samples = opusDecoder?.decode(opusFrame: frame) else {
@@ -434,9 +440,28 @@ final class SessionManager {
             }
         }
 
+        let snapshot = await transcribeOpusFile(at: captureURL, deleteOnSuccess: false)
+        let trimmedText = snapshot.fullText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let shouldPreserveAudio = lastError != nil || (trimmedText.isEmpty && snapshot.lines.isEmpty)
+        if shouldPreserveAudio {
+            if lastError == nil {
+                lastError = "Low Power transcription produced no text"
+            }
+            preserveDeferredCapture(at: captureURL, reason: lastError ?? "empty-transcript")
+        } else {
+            shouldDeleteCapture = true
+        }
+
+        return snapshot
+    }
+
+    /// Decode and transcribe a saved .opusframes file.
+    /// Used by both the normal deferred path and the recovery retry path.
+    /// - Parameter deleteOnSuccess: not used here; caller handles deletion.
+    @discardableResult
+    func transcribeOpusFile(at captureURL: URL, deleteOnSuccess: Bool = false) async -> TranscriptionService.Snapshot {
         guard let decoder = OpusStreamDecoder() else {
             lastError = "Opus decoder init failed — audio won't transcribe"
-            preserveDeferredCapture(at: captureURL, reason: lastError ?? "decoder-init")
             return .init(fullText: "", lines: [])
         }
 
@@ -444,8 +469,7 @@ final class SessionManager {
         do {
             renderFile = try PCMRenderFile()
         } catch {
-            lastError = "Couldn't create audio file for Low Power transcription: \(error.localizedDescription)"
-            preserveDeferredCapture(at: captureURL, reason: lastError ?? "render-file-init")
+            lastError = "Couldn't create audio file for transcription: \(error.localizedDescription)"
             return .init(fullText: "", lines: [])
         }
         defer { renderFile.delete() }
@@ -468,29 +492,82 @@ final class SessionManager {
             }
         } catch {
             PerformanceTrace.endInterval("DeferredTranscriptionRender", state: signpost, detail: "failed")
-            lastError = "Couldn't render Low Power transcription audio: \(error.localizedDescription)"
-            preserveDeferredCapture(at: captureURL, reason: lastError ?? "render-failed")
+            lastError = "Couldn't render transcription audio: \(error.localizedDescription)"
             return .init(fullText: "", lines: [])
         }
-        PerformanceTrace.endInterval("DeferredTranscriptionRender", state: signpost, detail: "frames=\(decodedFrameCount)")
+        PerformanceTrace.endInterval("DeferredTranscriptionRender", state: signpost, detail: "decoded=\(decodedFrameCount)")
 
         let snapshot = await transcription.transcribeFile(at: renderFile.url)
         if let error = transcription.lastError {
             lastError = error
         }
+        return snapshot
+    }
 
-        let trimmedText = snapshot.fullText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let shouldPreserveAudio = lastError != nil || (trimmedText.isEmpty && snapshot.lines.isEmpty)
-        if shouldPreserveAudio {
-            if lastError == nil {
-                lastError = "Low Power transcription produced no text"
+    // MARK: - Recovery
+
+    /// List saved .opusframes recovery files sorted newest-first.
+    func recoveryFiles() -> [URL] {
+        guard let docs = try? FileManager.default.url(
+            for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: false
+        ) else { return [] }
+        let dir = docs.appendingPathComponent("TranscriptionRecovery")
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey]
+        ) else { return [] }
+        return files
+            .filter { $0.pathExtension == "opusframes" }
+            .sorted {
+                let dA = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let dB = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return dA > dB
             }
-            preserveDeferredCapture(at: captureURL, reason: lastError ?? "empty-transcript")
-        } else {
-            shouldDeleteCapture = true
+    }
+
+    /// Retry transcription from a recovery .opusframes file.
+    /// Returns nil on success, an error message on failure.
+    func retryRecovery(at url: URL) async -> String? {
+        lastError = nil
+        decodedFrameCount = 0
+        decodeFailCount = 0
+
+        let snapshot = await transcribeOpusFile(at: url)
+        let trimmed = snapshot.fullText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if trimmed.isEmpty && snapshot.lines.isEmpty {
+            return lastError ?? "No text produced from audio"
         }
 
-        return snapshot
+        let title = autoTitle(from: snapshot.fullText)
+        let now = Date()
+        let doc = formatter.makeDocument(
+            title: title,
+            startTime: now,
+            endTime: now,
+            meeting: nil,
+            fullText: snapshot.fullText,
+            lines: snapshot.lines
+        )
+
+        do {
+            let fileURL = try saveTranscriptLocally(doc)
+            let syncStatus: RecentTranscript.SyncStatus = settings.autoPushEnabled ? .queued : .localOnly
+            addRecentTranscript(title: doc.title, filename: doc.filename, date: now, syncStatus: syncStatus, fileURL: fileURL)
+            if settings.autoPushEnabled {
+                pushTranscript(doc: doc, startTime: now, fileURL: fileURL)
+            }
+            try? FileManager.default.removeItem(at: url)
+            DebugLog.write("recovery succeeded file=\(url.lastPathComponent) title=\(title)")
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    /// Delete a recovery file.
+    func deleteRecovery(at url: URL) {
+        try? FileManager.default.removeItem(at: url)
     }
 
     private func checkCalendarState() {
@@ -574,6 +651,8 @@ final class SessionManager {
         state = .idle
         currentTitle = ""
         recordingDuration = 0
+        frameRate = 0
+        framesThisSecond = 0
         recordingStart = nil
         currentMeeting = nil
         activeTranscriptionMode = nil

@@ -34,11 +34,15 @@ Key files:
 - `SpeechLanguageModelCache.swift` -- builds and caches custom Speech language models from contextual phrases when available
 - `PendantBLE.swift` -- CoreBluetooth manager, retrieve-known reconnect path, filtered scan/service discovery, reconnect backoff
 - `TranscriptionService.swift` -- chunked live transcription + file-based deferred transcription, on-device checks, custom vocabulary prewarm, short-tail finalization, boundary-only chunk overlap merging
-- `SessionManager.swift` -- pipeline orchestrator; chooses live vs deferred transcription path, collects contextual vocabulary from meetings, reloads saved front matter with escaped-quote-safe parsing
-- `PushQueue.swift` -- offline retry queue with push timing policies (immediate / Wi‑Fi / charging) and retryable-vs-permanent GitHub failure handling
+- `SessionManager.swift` -- pipeline orchestrator; chooses live vs deferred transcription path, collects contextual vocabulary from meetings, reloads saved front matter with escaped-quote-safe parsing; `transcribeOpusFile(at:)` is the shared decode→render→speech core used by both the normal deferred path and recovery retries; exposes `frameRate` (frames/sec, updated every 1s by elapsedTimer) and `recoveryFiles()` / `retryRecovery(at:)` / `deleteRecovery(at:)` for the recovery UI
+- `PushQueue.swift` -- offline retry queue with push timing policies (immediate / Wi‑Fi / charging); `credentialError` is set on 401/403 and cleared by `clearCredentialError()` when a new PAT is saved; `retryAfter: Date?` on `PendingPush` gates drain() on the Retry-After window; `items` exposes the queue read-only for UI
+- `GitHubSync.swift` -- GitHub Contents API push; `SyncError.rateLimited(retryAfter:)` carries the Retry-After seconds parsed from the response header (default 60s); `isCredentialError` true for 401/403; uses a private static `URLSession` with `timeoutIntervalForRequest: 20` (not `URLSession.shared`) so the queue fails fast on bad networks
 - `MetricsCollector.swift` + `PerformanceTrace.swift` -- MetricKit payload capture and signpost instrumentation
 - `TranscriptFormatter.swift` -- YAML front matter + timestamped markdown
 - `DebugLog.swift` -- writes to Documents/debug.log for on-device diagnostics
+- `PushQueueView.swift` -- status screen showing queued items, retry counts, last errors, rate-limit state; accessible from Settings > Diagnostics
+- `RecoveryView.swift` -- browse and retry .opusframes files in Documents/TranscriptionRecovery; swipe-to-delete; retry calls `transcribeOpusFile(at:)` directly, bypassing session state machine
+- `DebugLogView.swift` -- reads Documents/debug.log in a monospace ScrollView; Copy + Refresh toolbar; only linked in Settings under `#if DEBUG`
 - `project.yml` -- XcodeGen config (source of truth for xcodeproj)
 
 ## BLE Protocol (Limitless Pendant)
@@ -102,3 +106,11 @@ Same format as TokDown macOS -- transcripts are indistinguishable in the archive
 - LimitlessCommand.messageIndex uses OSAllocatedUnfairLock for thread-safe atomic access
 - `FragmentReassembler` should reject out-of-range `fragmentSeq` values and only assemble when the fragment key set is exactly `0..<totalFragments`
 - `CalendarService.Meeting.id` should use EventKit's `eventIdentifier`, not a fresh UUID on each refresh, to keep SwiftUI diffing stable
+- GitHub 429 is no longer retryable via `isRetryable`; it's caught before the generic handler in `PushQueue.drain()` and sets `retryAfter` on the item — the drain() catch clauses must stay in order: `GitHubSync.SyncError` first, generic `Error` fallback second
+- `credentialError` on PushQueue is NOT cleared automatically on push retry; only `clearCredentialError()` via SettingsView's PAT save flow clears it
+- `frameRate` reflects frames received in the previous 1-second window (updated by elapsedTimer); it will read 0 for the first second of recording
+- `transcribeOpusFile(at:)` is `internal` (not `private`) so RecoveryView's retry path can call it from SessionManager without touching the session state machine; don't promote to public or call from outside the app module
+- `DebugLogView` is only wired into SettingsView under `#if DEBUG`; the log file still exists in release builds (DebugLog is a no-op), so reading it in release is safe but shows nothing
+- Don't include `kSecAttrAccessible` in `SecItemCopyMatching` read queries — it's a write-time attribute and silently returns `errSecItemNotFound` if the stored item's accessibility value differs from the query constraint
+- `TranscriptDetailView` re-push routes through `PushQueue.enqueue()`, not `GitHubSync.push()` directly — status shows "Queued" not "Pushed"; offline retry, timing policy, and credential-error handling all apply
+- `GitHubSync` uses a private static `URLSession` with `timeoutIntervalForRequest: 20`; don't switch back to `URLSession.shared` — the 60s default stalls PushQueue drain for a full minute per failed attempt on unreachable hosts

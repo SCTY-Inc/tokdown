@@ -1,5 +1,25 @@
 # Solutions Log
 
+## 2026-04-15: loadPAT silently returned nil when Keychain item accessibility differed from query constraint
+**Problem**: `GitHubSync.loadPAT()` could return nil even when a valid PAT was stored, causing all pushes to fail with `missingPAT` and no diagnosis.
+**Root cause**: `SecItemCopyMatching` was passed `kSecAttrAccessible: kSecAttrAccessibleWhenUnlockedThisDeviceOnly` as a search constraint. This attribute is write-time only; as a query filter it silently returns `errSecItemNotFound` if the stored item's accessibility value doesn't match exactly — including items created by an older code path or a different accessibility setting.
+**Fix**: Removed `kSecAttrAccessible` from the `loadPAT` read query. The attribute remains on `savePAT` and `addQuery` where it correctly constrains the stored item's accessibility.
+
+## 2026-04-15: No visibility into queued push failures, rate limits, or credential errors
+**Problem**: GitHub push failures (wrong PAT, 429 rate limits, offline) were invisible — items silently piled up or vanished, and users had no way to see queue state, retry counts, or error messages without reading debug.log via devicectl.
+**Root cause**: `PushQueue` had rich internal state (`retryCount`, `lastError`, timing) but no public surface; 429 was incorrectly classified alongside other retryable errors with no back-off; 401/403 burned retry budget and disappeared; no UI screen existed for the queue.
+**Fix**: Added `PushQueueView` (Settings > Diagnostics) showing each item with status badge, retry count, last error, and rate-limit countdown. Added `credentialError` property set on 401/403, shown as a distinct red banner in ContentView with "Update in Settings →" link. Added `SyncError.rateLimited(retryAfter:)` case: parses `Retry-After` header (default 60s, ceiling 3600s), sets `retryAfter: Date?` on the `PendingPush` item, skipped in `drain()` until window expires. `catch` clauses in `drain()` now match `GitHubSync.SyncError` before the generic `Error` fallback so rate-limit and credential cases are handled distinctly.
+
+## 2026-04-15: Failed Low Power transcriptions left unrecoverable audio with no user action path
+**Problem**: When deferred transcription failed, `.opusframes` files were preserved in `Documents/TranscriptionRecovery` with a message in `lastError`, but there was no UI to browse, retry, or delete them. Users could lose transcripts without realising audio was recoverable.
+**Root cause**: Recovery preservation existed but was only visible in the generic error banner. The retry logic was tightly coupled to `SessionManager`'s live session state (`deferredCapture` ivar, state transitions), making it impossible to call from a UI without faking a recording session.
+**Fix**: Extracted the decode→render→speech core into `transcribeOpusFile(at:)` (internal, not private) so recovery can call it with an explicit URL without touching session state. Added `recoveryFiles()` / `retryRecovery(at:)` / `deleteRecovery(at:)` to `SessionManager`. Created `RecoveryView` (Settings > Diagnostics) listing `.opusframes` files by date with size, swipe-to-delete, and a Retry button that runs the full transcription pipeline and saves/pushes the result.
+
+## 2026-04-15: No visual confirmation that pendant audio is flowing during recording
+**Problem**: During Low Power mode (and sometimes Live mode), the recording card showed no indication of whether Opus frames were actually arriving from the pendant. If the pendant drifted out of range mid-recording, users had no feedback until transcription produced nothing.
+**Root cause**: Frame arrival was tracked internally (`decodedFrameCount`) but not exposed to the UI.
+**Fix**: Added `frameRate: Double` to `SessionManager` — updated each second by the existing `elapsedTimer` from a `framesThisSecond` counter incremented in `processOpusFrame`. Added a 5-bar capsule indicator in `recordingCard` (bars light at 10/20/30/40/50 fps; normal pendant rate is ~50 fps for 20ms Opus frames).
+
 ## 2026-04-12: Transcript save/sync edge cases could overwrite, mislabel, or silently discard work
 **Problem**: Several normal-path failures could corrupt transcript handling: malformed protobuf notifications could crash decode, same-minute recordings could overwrite each other locally/remotely, deferred transcription timeouts could reuse the previous recording's text, short live tails could be dropped before finalization, and permanent GitHub failures could disappear after exhausting retry budget.
 **Root cause**: Multiple components assumed happy-path inputs or treated all failures the same. `Protobuf.decode()` computed length-delimited end indexes before proving bounds, transcript filenames only used minute precision, file transcription teardown kept stale fallback state alive, live finalization skipped `endAudio()` for short chunks, and `PushQueue` incremented retries for every failure class.

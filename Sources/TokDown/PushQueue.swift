@@ -18,12 +18,22 @@ final class PushQueue {
         let createdAt: Date
         var retryCount: Int = 0
         var lastError: String? = nil
+        /// When set, drain() skips this item until the date passes (rate limit back-off).
+        var retryAfter: Date? = nil
     }
 
     private(set) var pendingCount = 0
+    /// Set when a push fails with a credential error (401/403). Cleared when PAT is updated.
+    private(set) var credentialError: String? = nil
 
     var settings: SettingsStore?
     var onPushSuccess: ((PendingPush) -> Void)?
+
+    /// Read-only view of the queue — for status UI.
+    var items: [PendingPush] { queue }
+
+    /// Clear the credential error after the PAT has been updated.
+    func clearCredentialError() { credentialError = nil }
 
     private var queue: [PendingPush] = []
     private let github: GitHubSync
@@ -125,21 +135,41 @@ final class PushQueue {
                 }
                 guard let item = self.queue.first(where: { $0.id == id }) else { continue }
 
+                // Skip items that are rate-limited until their retry window expires.
+                if let retryAfter = item.retryAfter, retryAfter > Date() { continue }
+
                 do {
                     try await self.performPush(for: item)
                     self.removePendingPush(id: id)
                     self.onPushSuccess?(item)
-                } catch {
-                    let isRetryable = self.isRetryable(error)
-                    self.updatePendingPush(id: id) { pending in
-                        pending.lastError = error.localizedDescription
-                        if isRetryable {
-                            pending.retryCount += 1
+                } catch let syncError as GitHubSync.SyncError {
+                    if case .rateLimited(let seconds) = syncError {
+                        self.updatePendingPush(id: id) { pending in
+                            pending.lastError = syncError.localizedDescription
+                            pending.retryAfter = Date().addingTimeInterval(seconds)
                         }
-                    }
-                    if isRetryable {
                         break
                     }
+                    if syncError.isCredentialError {
+                        self.credentialError = "GitHub access denied — update your token in Settings."
+                        self.updatePendingPush(id: id) { pending in
+                            pending.lastError = syncError.localizedDescription
+                        }
+                        // Don't break — try remaining items (they'll fail too, but surfaces all errors)
+                        continue
+                    }
+                    let isRetryable = syncError.isRetryable
+                    self.updatePendingPush(id: id) { pending in
+                        pending.lastError = syncError.localizedDescription
+                        if isRetryable { pending.retryCount += 1 }
+                    }
+                    if isRetryable { break }
+                } catch {
+                    self.updatePendingPush(id: id) { pending in
+                        pending.lastError = error.localizedDescription
+                        pending.retryCount += 1
+                    }
+                    break
                 }
             }
         }
@@ -257,10 +287,4 @@ final class PushQueue {
         update(&queue[index])
     }
 
-    private func isRetryable(_ error: Error) -> Bool {
-        guard let syncError = error as? GitHubSync.SyncError else {
-            return true
-        }
-        return syncError.isRetryable
-    }
 }

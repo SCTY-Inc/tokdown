@@ -30,7 +30,9 @@ struct ContentView: View {
 
                         recentSection
 
-                        if let error = session.lastError {
+                        if let credError = session.pushQueue.credentialError {
+                            credentialErrorBanner(credError)
+                        } else if let error = session.lastError {
                             errorBanner(error)
                         }
                     }
@@ -125,12 +127,16 @@ struct ContentView: View {
                     .foregroundStyle(.primary)
             }
 
-            Text(session.transcriptionMode.title)
-                .font(.caption.bold())
-                .foregroundStyle(.red)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(.red.opacity(0.12), in: Capsule())
+            HStack(spacing: 12) {
+                Text(session.transcriptionMode.title)
+                    .font(.caption.bold())
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.red.opacity(0.12), in: Capsule())
+
+                audioLevelBars
+            }
 
             if !session.currentTitle.isEmpty {
                 Text(session.currentTitle)
@@ -151,6 +157,20 @@ struct ContentView: View {
             RoundedRectangle(cornerRadius: 16)
                 .fill(.red.opacity(0.08))
         )
+    }
+
+    /// 5-bar indicator driven by pendant frame arrival rate (frames/sec).
+    /// Normal pendant rate is ~50 fps (20ms Opus frames). Bars light at 10/20/30/40/50.
+    private var audioLevelBars: some View {
+        HStack(alignment: .bottom, spacing: 3) {
+            ForEach(0..<5, id: \.self) { i in
+                let threshold = Double((i + 1) * 10)
+                Capsule()
+                    .fill(session.frameRate >= threshold ? Color.red : Color.red.opacity(0.2))
+                    .frame(width: 4, height: 6 + Double(i) * 4)
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: Int(session.frameRate / 10))
     }
 
     private var formattedDuration: String {
@@ -383,6 +403,26 @@ struct ContentView: View {
         )
     }
 
+    private func credentialErrorBanner(_ message: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "key.slash.fill")
+                .foregroundStyle(.red)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                NavigationLink("Update in Settings →", destination: SettingsView())
+                    .font(.caption.bold())
+            }
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(.red.opacity(0.08))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.red.opacity(0.25), lineWidth: 1))
+        )
+    }
+
     // MARK: - Helpers
 
     private func meetingTime(_ date: Date) -> String {
@@ -398,8 +438,6 @@ struct TranscriptDetailView: View {
     @State private var content: String = ""
     @State private var isEditing = false
     @State private var saveStatus: String?
-
-    private let github = GitHubSync()
 
     var body: some View {
         Group {
@@ -474,23 +512,15 @@ struct TranscriptDetailView: View {
     private func rePush() {
         guard let url = transcript.fileURL else { return }
         let filename = url.lastPathComponent
-        Task {
-            do {
-                try await github.push(
-                    filename: filename,
-                    content: content,
-                    commitMessage: "update: \(transcript.title)",
-                    repo: session.settings.transcriptRepo,
-                    basePath: session.settings.transcriptRepoPath
-                )
-                await MainActor.run {
-                    session.markRecentTranscriptPushed(filename: filename)
-                }
-                showStatus("Pushed")
-            } catch {
-                showStatus("Push failed: \(error.localizedDescription)")
-            }
-        }
+        session.pushQueue.enqueue(
+            filename: filename,
+            content: content,
+            commitMessage: "update: \(transcript.title)",
+            repo: session.settings.transcriptRepo,
+            basePath: session.settings.transcriptRepoPath
+        )
+        session.markRecentTranscriptPushed(filename: filename)
+        showStatus("Queued")
     }
 
     private func showStatus(_ text: String) {

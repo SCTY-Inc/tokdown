@@ -126,6 +126,45 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Diagnostics") {
+                NavigationLink(destination: PushQueueView()) {
+                    LabeledContent("Push Queue") {
+                        if session.pushQueue.pendingCount > 0 {
+                            Text("\(session.pushQueue.pendingCount)")
+                                .font(.caption.bold())
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(.orange, in: Capsule())
+                        } else {
+                            Text("Empty")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                NavigationLink(destination: RecoveryView()) {
+                    LabeledContent("Recovery Files") {
+                        let count = session.recoveryFiles().count
+                        if count > 0 {
+                            Text("\(count)")
+                                .font(.caption.bold())
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(.red, in: Capsule())
+                        } else {
+                            Text("None")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                #if DEBUG
+                NavigationLink("Debug Log", destination: DebugLogView())
+                #endif
+            }
+
             Section("About") {
                 LabeledContent("App") {
                     Text("TokDown")
@@ -154,6 +193,7 @@ struct SettingsView: View {
             do {
                 try await github.savePAT(patInput)
                 session.settings.hasGitHubPAT = true
+                session.pushQueue.clearCredentialError()
                 patInput = ""
                 showPATSaved = true
                 try? await Task.sleep(for: .seconds(2))
