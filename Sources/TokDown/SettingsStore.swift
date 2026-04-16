@@ -5,10 +5,11 @@ import Foundation
 final class SettingsStore {
     var settings: AppSettings
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
     private let settingsKey = "TokDown.Settings.V2"
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         settings = Self.defaultSettings
         load()
     }

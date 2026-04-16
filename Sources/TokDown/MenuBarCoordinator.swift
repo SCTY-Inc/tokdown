@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import EventKit
 
 @MainActor
 @Observable
@@ -24,6 +25,7 @@ final class MenuBarCoordinator {
     private var currentArtifacts: SessionArtifacts?
     private var currentAudioSource: AudioSource?
     private var timerTask: Task<Void, Never>?
+    nonisolated(unsafe) private var calendarChangeObserver: NSObjectProtocol?
 
     var menuTitle: String {
         state == .recording ? formattedElapsed : ""
@@ -31,6 +33,22 @@ final class MenuBarCoordinator {
 
     init(settingsStore: SettingsStore) {
         self.settingsStore = settingsStore
+        calendarChangeObserver = NotificationCenter.default.addObserver(
+            forName: .EKEventStoreChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.state == .idle else { return }
+                await self.loadMeetings()
+            }
+        }
+    }
+
+    deinit {
+        if let observer = calendarChangeObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     // MARK: - Meetings
@@ -101,7 +119,19 @@ final class MenuBarCoordinator {
 
         let audioURL: URL?
         if systemAudioService.isRecording {
-            audioURL = await systemAudioService.stopCapture()
+            do {
+                audioURL = try await systemAudioService.stopCapture()
+            } catch {
+                statusMessage = error.localizedDescription
+                startTime = nil
+                activeTitle = nil
+                currentMeeting = nil
+                currentArtifacts = nil
+                currentAudioSource = nil
+                state = .idle
+                await loadMeetings()
+                return
+            }
         } else {
             audioURL = recordingService.stopRecording()
         }
@@ -119,6 +149,11 @@ final class MenuBarCoordinator {
 
         let recordingEndTime = Date()
         state = .transcribing
+
+        // Surface model download before transcription starts
+        if await transcriptionService.modelNeedsDownload() {
+            statusMessage = "Downloading speech model…"
+        }
 
         // Transcribe
         var lines: [TranscriptLine] = []

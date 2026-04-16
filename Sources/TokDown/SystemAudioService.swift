@@ -58,18 +58,20 @@ final class SystemAudioService: NSObject {
         isRecording = true
     }
 
-    func stopCapture() async -> URL? {
+    func stopCapture() async throws -> URL? {
         guard let stream else { return nil }
         try? await stream.stopCapture()
 
         self.stream = nil
         isRecording = false
 
-        if let handler = outputHandler { await handler.finish() }
-
         let url = outputURL
+        let handler = outputHandler
         outputURL = nil
         outputHandler = nil
+
+        if let handler { try await handler.finish() }
+
         return url
     }
 
@@ -121,11 +123,14 @@ private final class AudioOutputHandler: NSObject, SCStreamOutput {
         }
     }
 
-    @MainActor func finish() async {
+    @MainActor func finish() async throws {
         // Drain the writer queue to ensure no in-flight appends
         queue.sync {}
         input.markAsFinished()
         await writer.finishWriting()
+        if writer.status == .failed {
+            throw SystemAudioError.writeFailed(writer.error)
+        }
     }
 
     @MainActor func cancel() async {
@@ -137,10 +142,17 @@ private final class AudioOutputHandler: NSObject, SCStreamOutput {
 
 enum SystemAudioError: LocalizedError {
     case noDisplay
+    case writeFailed(Error?)
 
     var errorDescription: String? {
         switch self {
-        case .noDisplay: "No display found for audio capture."
+        case .noDisplay:
+            return "No display found for audio capture."
+        case .writeFailed(let underlying):
+            if let msg = underlying?.localizedDescription {
+                return "Audio write failed: \(msg)"
+            }
+            return "Audio write failed."
         }
     }
 }

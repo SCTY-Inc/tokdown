@@ -29,6 +29,8 @@ Core product constraints:
 │       ├── CalendarServiceTests.swift
 │       ├── MenuBarCoordinatorTests.swift
 │       ├── MenuBarIconPresentationTests.swift
+│       ├── RecordingServiceTests.swift
+│       ├── SettingsStoreTests.swift
 │       ├── StorageServiceTests.swift
 │       ├── SystemAudioServiceTests.swift
 │       ├── TranscriptFormatterTests.swift
@@ -94,7 +96,7 @@ Artifacts:
 
 ## Build, test, and lint commands
 
-There is no lint setup yet, but there is a focused XCTest suite covering transcript formatting, calendar access decisions, coordinator status handling, menu bar icon presentation, storage collision/cleanup behavior, system-audio rollback cleanup, and speech-permission mapping.
+There is no lint setup yet, but there is a focused XCTest suite covering transcript formatting, calendar access decisions, coordinator status handling, menu bar icon presentation, storage collision/cleanup behavior, system-audio rollback cleanup, speech-permission mapping, microphone permission-state mapping, and settings persistence.
 
 Use these checks before submitting changes:
 
@@ -156,6 +158,10 @@ Do not:
 - Speech recognition permission is requested before recording starts because the product promise is transcript-first, not raw-audio capture.
 - ScreenCaptureKit still requires a minimal video config even for audio-only capture.
 - Audio capture uses `Mutex` (Synchronization framework) for session tracking and a serial `DispatchQueue` to serialize writer access across the capture callback and `finish()`.
+- `SystemAudioService.stopCapture()` is `async throws` — propagates `SystemAudioError.writeFailed` when `AVAssetWriter` finishes in `.failed` state.
+- `TranscriptionService.transcribe()` has a 300-second timeout implemented as a `withThrowingTaskGroup` race; throws `TranscriptionError.timeout` if the pipeline stalls.
+- `MenuBarCoordinator` observes `EKEventStore.changedNotification` to auto-refresh meetings; only acts when `state == .idle` to avoid clobbering recording status messages.
+- `SettingsStore.init(defaults:)` accepts a `UserDefaults` suite for test isolation; use `UserDefaults(suiteName: UUID().uuidString)` in tests.
 - Menu bar UI uses `MenuBarExtra` with `.menu` style, so layout behavior is constrained.
 - Permission prompts and TCC behavior depend on code signing; the build script signs the app automatically.
 - Upcoming meeting loading requires full calendar read access; `.writeOnly` should be treated as upgrade-required, not as a readable success state.

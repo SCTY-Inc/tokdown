@@ -25,6 +25,7 @@ struct MenuBarIconPresentation: Equatable {
 
 struct MenuBarIconView: View {
     let state: RecordingState
+    @State private var animPhase: Bool = false
 
     private var presentation: MenuBarIconPresentation {
         .forState(state)
@@ -59,8 +60,15 @@ struct MenuBarIconView: View {
                     Circle()
                         .fill(.primary)
                         .frame(width: 1.8, height: 1.8)
+                        .opacity(animPhase ? 1.0 : 0.3)
                 }
             }
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                    animPhase = true
+                }
+            }
+            .onDisappear { animPhase = false }
         }
     }
 }

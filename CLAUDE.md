@@ -1,6 +1,6 @@
 # CLAUDE.md — TokDown
 
-macOS menu bar app: system audio → transcript markdown. ~1.2k app LOC, focused XCTest coverage, no deps.
+macOS menu bar app: system audio → transcript markdown. ~1.6k app LOC, focused XCTest coverage, no deps.
 
 ## Build & Run
 ```bash
@@ -22,3 +22,7 @@ bash scripts/build-app.sh debug && open TokDown.app
 - Speech recognition permission is preflighted before recording can start.
 - Calendar meeting loading requires full access; write-only access should surface an upgrade-required state.
 - Raw audio cleanup must permanently remove files, not move them to Trash.
+- `SystemAudioService.stopCapture()` is `async throws` — callers must `try await`; throws `SystemAudioError.writeFailed` if `AVAssetWriter` finishes in `.failed` state.
+- `nonisolated(unsafe)` is required for `var` properties accessed in `deinit` of `@Observable` classes — `nonisolated` alone is rejected by the `@ObservationTracked` macro expansion, despite the compiler warning suggesting it.
+- `TranscriptionService.transcribe()` has a 300-second timeout via `withThrowingTaskGroup`; throws `TranscriptionError.timeout` if the speech pipeline stalls.
+- `SettingsStore.init(defaults:)` accepts a `UserDefaults` suite for test injection; production code uses `.standard` by default.

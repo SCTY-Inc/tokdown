@@ -5,10 +5,18 @@ import AVFoundation
 final class RecordingService {
     private var recorder: AVAudioRecorder?
 
+    nonisolated static func microphoneAccessGranted(for status: AVAuthorizationStatus) -> Bool? {
+        switch status {
+        case .authorized: return true
+        case .denied, .restricted: return false
+        case .notDetermined: return nil
+        @unknown default: return false
+        }
+    }
+
     func requestMicrophonePermission() async -> Bool {
         let status = AVCaptureDevice.authorizationStatus(for: .audio)
-        if status == .authorized { return true }
-        if status == .denied || status == .restricted { return false }
+        if let resolved = Self.microphoneAccessGranted(for: status) { return resolved }
 
         return await withCheckedContinuation { continuation in
             AVCaptureDevice.requestAccess(for: .audio) { granted in

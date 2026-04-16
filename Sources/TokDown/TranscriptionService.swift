@@ -70,45 +70,69 @@ final class TranscriptionService {
         }
     }
 
+    func modelNeedsDownload() async -> Bool {
+        let transcriber = SpeechTranscriber(locale: .current, preset: .transcription)
+        let status = await AssetInventory.status(forModules: [transcriber])
+        switch status {
+        case .installed: return false
+        default: return true
+        }
+    }
+
     func transcribe(audioURL: URL) async throws -> (fullText: String, lines: [TranscriptLine]) {
         try await ensureModelAvailable()
 
-        let transcriber = SpeechTranscriber(
-            locale: .current,
-            preset: .timeIndexedProgressiveTranscription
-        )
+        return try await withThrowingTaskGroup(of: (String, [TranscriptLine]).self) { group in
+            group.addTask {
+                let transcriber = SpeechTranscriber(
+                    locale: .current,
+                    preset: .timeIndexedProgressiveTranscription
+                )
+                let audioFile = try AVAudioFile(forReading: audioURL)
+                // Keep analyzer alive — it drives the transcription pipeline
+                let _analyzer = try await SpeechAnalyzer(
+                    inputAudioFile: audioFile,
+                    modules: [transcriber],
+                    finishAfterFile: true
+                )
+                _ = _analyzer
 
-        let audioFile = try AVAudioFile(forReading: audioURL)
-        // Keep analyzer alive — it drives the transcription pipeline
-        let _analyzer = try await SpeechAnalyzer(
-            inputAudioFile: audioFile,
-            modules: [transcriber],
-            finishAfterFile: true
-        )
-        _ = _analyzer
-
-        var lines: [TranscriptLine] = []
-
-        for try await result in transcriber.results where result.isFinal {
-            let seconds = CMTimeGetSeconds(result.range.start)
-            let text = String(result.text.characters)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !text.isEmpty {
-                lines.append(TranscriptLine(timestamp: seconds, text: text))
+                var lines: [TranscriptLine] = []
+                for try await result in transcriber.results where result.isFinal {
+                    let seconds = CMTimeGetSeconds(result.range.start)
+                    let text = String(result.text.characters)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !text.isEmpty {
+                        lines.append(TranscriptLine(timestamp: seconds, text: text))
+                    }
+                }
+                return (lines.map(\.text).joined(separator: " "), lines)
             }
-        }
 
-        let fullText = lines.map(\.text).joined(separator: " ")
-        return (fullText, lines)
+            group.addTask {
+                try await Task.sleep(for: .seconds(300))
+                throw TranscriptionError.timeout
+            }
+
+            defer { group.cancelAll() }
+            guard let result = try await group.next() else {
+                throw TranscriptionError.timeout
+            }
+            return result
+        }
     }
 }
 
 enum TranscriptionError: LocalizedError {
     case modelNotInstalled
+    case timeout
 
     var errorDescription: String? {
         switch self {
-        case .modelNotInstalled: "Speech model not available for this locale."
+        case .modelNotInstalled:
+            return "Speech model not available for this locale."
+        case .timeout:
+            return "Transcription timed out. The speech model may be unavailable or the recording too long."
         }
     }
 }
