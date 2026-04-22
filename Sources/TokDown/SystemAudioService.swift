@@ -1,27 +1,35 @@
 import Foundation
+import AppKit
 import Synchronization
 import ScreenCaptureKit
 import AVFoundation
+
+private enum SystemAudioCaptureFormat {
+    static let sampleRate = 48_000
+    static let channelCount = 2
+    static let bitRate = 128_000
+}
 
 @MainActor
 final class SystemAudioService: NSObject {
     private var stream: SCStream?
     private var outputHandler: AudioOutputHandler?
+    private var screenOutputHandler: ScreenOutputHandler?
     private var outputURL: URL?
 
     private(set) var isRecording = false
 
     func startCapture(to url: URL) async throws {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
-        guard let display = content.displays.first else {
+        guard let display = preferredDisplay(from: content.displays) else {
             throw SystemAudioError.noDisplay
         }
 
         let filter = SCContentFilter(display: display, excludingWindows: [])
         let config = SCStreamConfiguration()
         config.capturesAudio = true
-        config.sampleRate = 44_100
-        config.channelCount = 1
+        config.sampleRate = SystemAudioCaptureFormat.sampleRate
+        config.channelCount = SystemAudioCaptureFormat.channelCount
         config.excludesCurrentProcessAudio = true
         config.width = 2
         config.height = 2
@@ -30,23 +38,33 @@ final class SystemAudioService: NSObject {
         let writer = try AVAssetWriter(url: url, fileType: .m4a)
         let input = AVAssetWriterInput(mediaType: .audio, outputSettings: [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: 44_100,
-            AVNumberOfChannelsKey: 1,
+            AVSampleRateKey: SystemAudioCaptureFormat.sampleRate,
+            AVNumberOfChannelsKey: SystemAudioCaptureFormat.channelCount,
             AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
-            AVEncoderBitRateKey: 64_000
+            AVEncoderBitRateKey: SystemAudioCaptureFormat.bitRate
         ])
         input.expectsMediaDataInRealTime = true
+
+        guard writer.canAdd(input) else {
+            throw SystemAudioError.writeFailed(writer.error)
+        }
         writer.add(input)
-        writer.startWriting()
+
+        guard writer.startWriting() else {
+            throw SystemAudioError.writeFailed(writer.error)
+        }
 
         let handler = AudioOutputHandler(writer: writer, input: input)
+        let screenHandler = ScreenOutputHandler()
         let scStream = SCStream(filter: filter, configuration: config, delegate: nil)
 
         outputHandler = handler
+        screenOutputHandler = screenHandler
         outputURL = url
         isRecording = false
 
         do {
+            try scStream.addStreamOutput(screenHandler, type: .screen, sampleHandlerQueue: DispatchQueue(label: "screen.capture"))
             try scStream.addStreamOutput(handler, type: .audio, sampleHandlerQueue: DispatchQueue(label: "audio.capture"))
             try await scStream.startCapture()
         } catch {
@@ -69,8 +87,18 @@ final class SystemAudioService: NSObject {
         let handler = outputHandler
         outputURL = nil
         outputHandler = nil
+        screenOutputHandler = nil
 
-        if let handler { try await handler.finish() }
+        if let handler {
+            do {
+                try await handler.finish()
+            } catch {
+                if let url {
+                    Self.removePartialCaptureFile(at: url)
+                }
+                throw error
+            }
+        }
 
         return url
     }
@@ -83,13 +111,46 @@ final class SystemAudioService: NSObject {
 
         self.stream = nil
         self.outputHandler = nil
+        self.screenOutputHandler = nil
         self.outputURL = nil
         self.isRecording = false
+    }
+
+    private func preferredDisplay(from displays: [SCDisplay]) -> SCDisplay? {
+        guard !displays.isEmpty else { return nil }
+
+        let mouseLocation = NSEvent.mouseLocation
+        if let hoveredDisplayID = displayID(for: NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) })),
+           let hoveredDisplay = displays.first(where: { $0.displayID == hoveredDisplayID }) {
+            return hoveredDisplay
+        }
+
+        if let mainDisplayID = displayID(for: NSScreen.main),
+           let mainDisplay = displays.first(where: { $0.displayID == mainDisplayID }) {
+            return mainDisplay
+        }
+
+        return displays.first
+    }
+
+    private func displayID(for screen: NSScreen?) -> CGDirectDisplayID? {
+        guard let screen,
+              let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
+            return nil
+        }
+
+        return CGDirectDisplayID(number.uint32Value)
     }
 
     nonisolated static func removePartialCaptureFile(at url: URL, fileManager: FileManager = .default) {
         guard fileManager.fileExists(atPath: url.path) else { return }
         try? fileManager.removeItem(at: url)
+    }
+}
+
+private final class ScreenOutputHandler: NSObject, SCStreamOutput {
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard type == .screen else { return }
     }
 }
 
@@ -100,6 +161,7 @@ private final class AudioOutputHandler: NSObject, SCStreamOutput {
     nonisolated(unsafe) private let input: AVAssetWriterInput
     private let queue = DispatchQueue(label: "audio.writer")
     private let sessionStarted = Mutex(false)
+    private let appendedAudioSample = Mutex(false)
 
     init(writer: AVAssetWriter, input: AVAssetWriterInput) {
         self.writer = writer
@@ -117,8 +179,9 @@ private final class AudioOutputHandler: NSObject, SCStreamOutput {
                 }
             }
 
-            if input.isReadyForMoreMediaData {
-                input.append(sampleBuffer)
+            guard input.isReadyForMoreMediaData else { return }
+            if input.append(sampleBuffer) {
+                appendedAudioSample.withLock { $0 = true }
             }
         }
     }
@@ -126,6 +189,13 @@ private final class AudioOutputHandler: NSObject, SCStreamOutput {
     @MainActor func finish() async throws {
         // Drain the writer queue to ensure no in-flight appends
         queue.sync {}
+
+        let appendedAudio = appendedAudioSample.withLock { $0 }
+        guard appendedAudio else {
+            await cancel()
+            throw SystemAudioError.noAudioCaptured
+        }
+
         input.markAsFinished()
         await writer.finishWriting()
         if writer.status == .failed {
@@ -142,12 +212,15 @@ private final class AudioOutputHandler: NSObject, SCStreamOutput {
 
 enum SystemAudioError: LocalizedError {
     case noDisplay
+    case noAudioCaptured
     case writeFailed(Error?)
 
     var errorDescription: String? {
         switch self {
         case .noDisplay:
             return "No display found for audio capture."
+        case .noAudioCaptured:
+            return "No system audio was captured."
         case .writeFailed(let underlying):
             if let msg = underlying?.localizedDescription {
                 return "Audio write failed: \(msg)"

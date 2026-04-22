@@ -45,7 +45,8 @@ Most transcription tools trap your notes in another app or SaaS dashboard. TokDo
 3. Open Settings any time to choose whether TokDown records System Audio or Microphone by default
 4. Stop when done
 5. TokDown transcribes and saves a `.md` file — typically in under a minute
-6. The audio file is deleted permanently
+6. If system-audio capture never receives any audio, TokDown reports an error instead of saving an empty transcript
+7. The audio file is deleted permanently
 
 Transcripts are saved to `~/Documents/Transcripts/` by default:
 

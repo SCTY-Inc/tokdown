@@ -96,7 +96,7 @@ Artifacts:
 
 ## Build, test, and lint commands
 
-There is no lint setup yet, but there is a focused XCTest suite covering transcript formatting, calendar access decisions, coordinator status handling, menu bar icon presentation, storage collision/cleanup behavior, system-audio rollback cleanup, speech-permission mapping, microphone permission-state mapping, and settings persistence.
+There is no lint setup yet, but there is a focused XCTest suite covering transcript formatting, calendar access decisions, coordinator status handling, menu bar icon presentation, storage collision/cleanup behavior, system-audio rollback cleanup, system-audio zero-capture error reporting, speech-permission mapping, microphone permission-state mapping, and settings persistence.
 
 Use these checks before submitting changes:
 
@@ -157,8 +157,9 @@ Do not:
 - The app uses Apple’s newer on-device SpeechTranscriber pipeline.
 - Speech recognition permission is requested before recording starts because the product promise is transcript-first, not raw-audio capture.
 - ScreenCaptureKit still requires a minimal video config even for audio-only capture.
+- System-audio capture registers both `.screen` and `.audio` outputs and prefers the hovered display, then `NSScreen.main`, instead of blindly using the first ScreenCaptureKit display; this avoids sessions that appear to record but never receive audio samples.
 - Audio capture uses `Mutex` (Synchronization framework) for session tracking and a serial `DispatchQueue` to serialize writer access across the capture callback and `finish()`.
-- `SystemAudioService.stopCapture()` is `async throws` — propagates `SystemAudioError.writeFailed` when `AVAssetWriter` finishes in `.failed` state.
+- `SystemAudioService.stopCapture()` is `async throws` — propagates `SystemAudioError.noAudioCaptured` when no system-audio samples were appended and `SystemAudioError.writeFailed` when `AVAssetWriter` finishes in `.failed` state.
 - `TranscriptionService.transcribe()` has a 300-second timeout implemented as a `withThrowingTaskGroup` race; throws `TranscriptionError.timeout` if the pipeline stalls.
 - `MenuBarCoordinator` observes `EKEventStore.changedNotification` to auto-refresh meetings; only acts when `state == .idle` to avoid clobbering recording status messages.
 - `SettingsStore.init(defaults:)` accepts a `UserDefaults` suite for test isolation; use `UserDefaults(suiteName: UUID().uuidString)` in tests.
@@ -201,6 +202,7 @@ Manual verification checklist:
 - audio file is permanently deleted after transcription instead of being moved to Trash
 - settings window opens, saves changes, and persists the selected audio source
 - permission prompts and denied/upgrade-required status messages still make sense for the changed workflow
+- system-audio recordings fail loudly instead of silently writing `(No transcript)` when no audio samples arrive
 
 ## Transcript format contract
 

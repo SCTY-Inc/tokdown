@@ -2,6 +2,13 @@ import XCTest
 @testable import TokDown
 
 final class SystemAudioServiceTests: XCTestCase {
+    func testNoAudioCapturedErrorDescriptionIsClear() {
+        XCTAssertEqual(
+            SystemAudioError.noAudioCaptured.localizedDescription,
+            "No system audio was captured."
+        )
+    }
+
     func testRemovePartialCaptureFileDeletesExistingFile() throws {
         let tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
