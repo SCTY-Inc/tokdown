@@ -31,3 +31,6 @@ credentials
 
 # Project-local MCP config
 .mcp.json
+
+# Agent local state
+.pi/
