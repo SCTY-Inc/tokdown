@@ -65,7 +65,7 @@ Core product constraints:
 - `Sources/TokDown/RecordingService.swift` — microphone capture fallback
 - `Sources/TokDown/TranscriptionService.swift` — Apple SpeechTranscriber pipeline
 - `Sources/TokDown/TranscriptFormatter.swift` — front matter, title inference, and markdown rendering
-- `Sources/TokDown/StorageService.swift` — transcript output and cleanup
+- `Sources/TokDown/StorageService.swift` — transcript output, deletion, and orphan `.m4a` cleanup on startup
 - `Sources/TokDown/CalendarService.swift` — upcoming meetings and calendar permissions
 - `scripts/build-app.sh` — build, bundle, sign, and zip release artifact
 
@@ -96,7 +96,7 @@ Artifacts:
 
 ## Build, test, and lint commands
 
-There is no lint setup yet, but there is a focused XCTest suite covering transcript formatting, calendar access decisions, coordinator status handling, menu bar icon presentation, storage collision/cleanup behavior, system-audio rollback cleanup, system-audio zero-capture error reporting, speech-permission mapping, microphone permission-state mapping, and settings persistence.
+There is no lint setup yet, but there is a focused XCTest suite covering transcript formatting, calendar access decisions, coordinator status handling, menu bar icon presentation, storage collision/cleanup behavior, orphaned audio file cleanup, system-audio rollback cleanup, system-audio zero-capture error reporting, speech-permission mapping, microphone permission-state mapping, and settings persistence.
 
 Use these checks before submitting changes:
 
@@ -161,7 +161,7 @@ Do not:
 - Audio capture uses `Mutex` (Synchronization framework) for session tracking and a serial `DispatchQueue` to serialize writer access across the capture callback and `finish()`.
 - `SystemAudioService.stopCapture()` is `async throws` — propagates `SystemAudioError.noAudioCaptured` when no system-audio samples were appended and `SystemAudioError.writeFailed` when `AVAssetWriter` finishes in `.failed` state.
 - `TranscriptionService.transcribe()` has a 300-second timeout implemented as a `withThrowingTaskGroup` race; throws `TranscriptionError.timeout` if the pipeline stalls.
-- `MenuBarCoordinator` observes `EKEventStore.changedNotification` to auto-refresh meetings; only acts when `state == .idle` to avoid clobbering recording status messages.
+- `MenuBarCoordinator` observes `EKEventStore.changedNotification` to auto-refresh meetings; only acts when `state == .idle` to avoid clobbering recording status messages. `loadMeetings()` also calls `StorageService.cleanupOrphanedAudioFiles` on each invocation to delete any `.m4a` files left behind by sessions that crashed during transcription.
 - `SettingsStore.init(defaults:)` accepts a `UserDefaults` suite for test isolation; use `UserDefaults(suiteName: UUID().uuidString)` in tests.
 - Menu bar UI uses `MenuBarExtra` with `.menu` style, so layout behavior is constrained.
 - Permission prompts and TCC behavior depend on code signing; the build script signs the app automatically.

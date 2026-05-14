@@ -40,7 +40,7 @@ final class RecordingService {
         recorder = try AVAudioRecorder(url: url, settings: settings)
         recorder?.prepareToRecord()
         guard recorder?.record() == true else {
-            throw NSError(domain: "RecordingService", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not start recorder"])
+            throw RecordingError.couldNotStart
         }
     }
 
@@ -50,5 +50,13 @@ final class RecordingService {
         let url = recorder.url
         self.recorder = nil
         return url
+    }
+}
+
+enum RecordingError: LocalizedError {
+    case couldNotStart
+
+    var errorDescription: String? {
+        "Could not start recorder."
     }
 }

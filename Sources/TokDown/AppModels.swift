@@ -125,10 +125,14 @@ struct UpcomingMeeting: Identifiable, Hashable {
     }
 
     var timeWindowLabel: String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "h:mm a"
-        return "\(formatter.string(from: startDate)) – \(formatter.string(from: endDate))"
+        "\(Self.timeFormatter.string(from: startDate)) – \(Self.timeFormatter.string(from: endDate))"
     }
+
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "h:mm a"
+        return f
+    }()
 }
 
 struct TranscriptLine: Sendable {

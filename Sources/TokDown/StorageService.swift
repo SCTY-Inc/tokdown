@@ -29,13 +29,15 @@ final class StorageService {
         )
     }
 
-    func transcriptURL(folderBase: URL, title: String, startTime: Date) -> URL {
-        let baseName = nextAvailableBaseName(folderBase: folderBase, title: title, startTime: startTime, extensions: ["md"])
-        return folderBase.appendingPathComponent("\(baseName).md")
-    }
-
     func writeTranscript(_ text: String, to url: URL) throws {
         try text.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    func cleanupOrphanedAudioFiles(in folder: URL) {
+        guard let contents = try? fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return }
+        for url in contents where url.pathExtension == "m4a" {
+            deleteFile(url)
+        }
     }
 
     @discardableResult

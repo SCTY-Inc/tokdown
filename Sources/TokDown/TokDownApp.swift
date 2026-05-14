@@ -24,7 +24,7 @@ final class SettingsWindowManager {
 
         windowController?.window?.setContentSize(windowSize)
         windowController?.window?.center()
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         windowController?.showWindow(nil)
         windowController?.window?.makeKeyAndOrderFront(nil)
     }

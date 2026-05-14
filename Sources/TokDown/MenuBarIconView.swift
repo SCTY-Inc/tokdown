@@ -56,18 +56,20 @@ struct MenuBarIconView: View {
                 .frame(width: 5.5, height: 5.5)
         case .transcribing:
             HStack(spacing: 1.2) {
-                ForEach(0..<3, id: \.self) { _ in
+                ForEach(0..<3, id: \.self) { index in
                     Circle()
                         .fill(.primary)
                         .frame(width: 1.8, height: 1.8)
                         .opacity(animPhase ? 1.0 : 0.3)
+                        .animation(
+                            .easeInOut(duration: 0.6)
+                                .repeatForever(autoreverses: true)
+                                .delay(Double(index) * 0.2),
+                            value: animPhase
+                        )
                 }
             }
-            .onAppear {
-                withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
-                    animPhase = true
-                }
-            }
+            .onAppear { animPhase = true }
             .onDisappear { animPhase = false }
         }
     }

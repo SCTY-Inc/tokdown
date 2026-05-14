@@ -89,13 +89,11 @@ final class TranscriptionService {
                     preset: .timeIndexedProgressiveTranscription
                 )
                 let audioFile = try AVAudioFile(forReading: audioURL)
-                // Keep analyzer alive — it drives the transcription pipeline
-                let _analyzer = try await SpeechAnalyzer(
+                let analyzer = try await SpeechAnalyzer(
                     inputAudioFile: audioFile,
                     modules: [transcriber],
                     finishAfterFile: true
                 )
-                _ = _analyzer
 
                 var lines: [TranscriptLine] = []
                 for try await result in transcriber.results where result.isFinal {
@@ -106,6 +104,7 @@ final class TranscriptionService {
                         lines.append(TranscriptLine(timestamp: seconds, text: text))
                     }
                 }
+                _ = analyzer  // must follow the async loop — prevents ARC from dropping before pipeline drains
                 return (lines.map(\.text).joined(separator: " "), lines)
             }
 

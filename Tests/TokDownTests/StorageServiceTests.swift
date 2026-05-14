@@ -21,22 +21,25 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertEqual(second.transcriptURL.lastPathComponent, "\(expectedBase)-2.md")
     }
 
-    func testTranscriptURLAddsSuffixWithoutChangingDateFirstPrefix() throws {
+    func testCleanupOrphanedAudioFilesDeletesM4AFilesInFolder() throws {
         let folder = try makeTempFolder()
         let service = StorageService()
-        let startTime = date("2026-03-13T14:00:00Z")
 
-        let existing = service.transcriptURL(folderBase: folder, title: "Recording", startTime: startTime)
-        FileManager.default.createFile(atPath: existing.path, contents: Data())
+        let m4aURL = folder.appendingPathComponent("2026-01-01_10-00_Meeting.m4a")
+        let mdURL = folder.appendingPathComponent("2026-01-01_10-00_Meeting.md")
+        FileManager.default.createFile(atPath: m4aURL.path, contents: Data())
+        FileManager.default.createFile(atPath: mdURL.path, contents: Data())
 
-        let next = service.transcriptURL(folderBase: folder, title: "Recording", startTime: startTime)
+        service.cleanupOrphanedAudioFiles(in: folder)
 
-        let expectedBase = expectedBaseName(for: startTime, title: "Recording")
-        let expectedPrefix = expectedDatePrefix(for: startTime)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: m4aURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: mdURL.path))
+    }
 
-        XCTAssertEqual(existing.lastPathComponent, "\(expectedBase).md")
-        XCTAssertEqual(next.lastPathComponent, "\(expectedBase)-2.md")
-        XCTAssertTrue(next.lastPathComponent.hasPrefix("\(expectedPrefix)_"))
+    func testCleanupOrphanedAudioFilesIsNoOpForMissingFolder() {
+        let service = StorageService()
+        let missing = URL(fileURLWithPath: "/tmp/nonexistent-\(UUID().uuidString)")
+        service.cleanupOrphanedAudioFiles(in: missing)
     }
 
     func testDeleteFileUsesPermanentRemovalInsteadOfTrash() {

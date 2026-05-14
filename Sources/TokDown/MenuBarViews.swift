@@ -45,6 +45,10 @@ struct MenuBarContentView: View {
                 }
             }
 
+            if let msg = coordinator.statusMessage {
+                Text(msg).font(.caption).foregroundStyle(.red)
+            }
+
             Divider()
 
             Button(action: { coordinator.openRecordingsFolder() }) {
@@ -59,10 +63,6 @@ struct MenuBarContentView: View {
 
             Button(action: { NSApplication.shared.terminate(nil) }) {
                 Label("Quit", systemImage: "xmark.circle")
-            }
-
-            if let msg = coordinator.statusMessage {
-                Text(msg).font(.caption).foregroundStyle(.red)
             }
         }
         .task {

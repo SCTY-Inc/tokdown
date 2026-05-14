@@ -27,3 +27,5 @@ bash scripts/build-app.sh debug && open TokDown.app
 - `TranscriptionService.transcribe()` has a 300-second timeout via `withThrowingTaskGroup`; throws `TranscriptionError.timeout` if the speech pipeline stalls.
 - `SettingsStore.init(defaults:)` accepts a `UserDefaults` suite for test injection; production code uses `.standard` by default.
 - `SystemAudioService` prefers the hovered display, then `NSScreen.main`, instead of blindly using the first ScreenCaptureKit display; arbitrary display selection can produce empty system-audio sessions when output routes move around.
+- `SpeechAnalyzer` keep-alive: `_ = analyzer` must appear **after** the `for try await` loop, not before it. ARC determines lifetime by last-use; placing it before the loop lets the compiler drop the analyzer before the pipeline drains.
+- `StorageService.cleanupOrphanedAudioFiles(in:)` is called from `loadMeetings()` and deletes any `.m4a` files in the save folder — crash-orphaned audio from sessions that died during transcription is cleaned on the next menu open.

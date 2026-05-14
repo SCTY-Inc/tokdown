@@ -54,6 +54,7 @@ final class MenuBarCoordinator {
     // MARK: - Meetings
 
     func loadMeetings() async {
+        storageService.cleanupOrphanedAudioFiles(in: settingsStore.saveFolderURL)
         let result = await calendarService.upcomingMeetings(limit: 3)
         upcomingMeetings = result.meetings
         statusMessage = Self.meetingsStatusMessage(
