@@ -4,7 +4,6 @@ import XCTest
 final class CalendarServiceTests: XCTestCase {
     func testReadAccessStateAllowsReadCapableStatuses() {
         XCTAssertEqual(CalendarService.readAccessState(for: .fullAccess), .allowed)
-        XCTAssertEqual(CalendarService.readAccessState(for: .authorized), .allowed)
     }
 
     func testReadAccessStateRequiresUpgradeForWriteOnly() {

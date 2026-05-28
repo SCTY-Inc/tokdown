@@ -2,44 +2,59 @@ import XCTest
 @testable import TokDown
 
 final class StorageServiceTests: XCTestCase {
-    func testSessionArtifactsAddsDeterministicSuffixWhenMinuteCollides() throws {
+    func testTemporaryAudioURLUsesAppOwnedTempFolder() throws {
+        let transcriptFolder = try makeTempFolder()
+        let tempFolder = try makeTempFolder()
+        let service = StorageService(temporaryDirectory: tempFolder)
+        let startTime = date("2026-03-13T14:00:00Z")
+
+        let audioURL = try service.temporaryAudioURL(startTime: startTime)
+
+        XCTAssertTrue(audioURL.path.hasPrefix(tempFolder.path))
+        XCTAssertFalse(audioURL.path.hasPrefix(transcriptFolder.path))
+        XCTAssertEqual(audioURL.pathExtension, "m4a")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: audioURL.deletingLastPathComponent().path))
+    }
+
+    func testTranscriptURLAddsDeterministicSuffixWhenMinuteCollides() throws {
         let folder = try makeTempFolder()
         let service = StorageService()
         let startTime = date("2026-03-13T14:00:00Z")
 
-        let first = try service.sessionArtifacts(folderBase: folder, title: "Weekly Sync", startTime: startTime)
-        FileManager.default.createFile(atPath: first.audioURL.path, contents: Data())
-        FileManager.default.createFile(atPath: first.transcriptURL.path, contents: Data())
+        let first = try service.transcriptURL(folderBase: folder, title: "Weekly Sync", startTime: startTime)
+        FileManager.default.createFile(atPath: first.path, contents: Data())
 
-        let second = try service.sessionArtifacts(folderBase: folder, title: "Weekly Sync", startTime: startTime)
+        let second = try service.transcriptURL(folderBase: folder, title: "Weekly Sync", startTime: startTime)
 
         let expectedBase = expectedBaseName(for: startTime, title: "Weekly Sync")
 
-        XCTAssertEqual(first.audioURL.lastPathComponent, "\(expectedBase).m4a")
-        XCTAssertEqual(first.transcriptURL.lastPathComponent, "\(expectedBase).md")
-        XCTAssertEqual(second.audioURL.lastPathComponent, "\(expectedBase)-2.m4a")
-        XCTAssertEqual(second.transcriptURL.lastPathComponent, "\(expectedBase)-2.md")
+        XCTAssertEqual(first.lastPathComponent, "\(expectedBase).md")
+        XCTAssertEqual(second.lastPathComponent, "\(expectedBase)-2.md")
     }
 
-    func testCleanupOrphanedAudioFilesDeletesM4AFilesInFolder() throws {
-        let folder = try makeTempFolder()
-        let service = StorageService()
+    func testCleanupTemporaryAudioFilesDeletesOnlyTokDownTempAudio() throws {
+        let userFolder = try makeTempFolder()
+        let tempFolder = try makeTempFolder()
+        let service = StorageService(temporaryDirectory: tempFolder)
 
-        let m4aURL = folder.appendingPathComponent("2026-01-01_10-00_Meeting.m4a")
-        let mdURL = folder.appendingPathComponent("2026-01-01_10-00_Meeting.md")
-        FileManager.default.createFile(atPath: m4aURL.path, contents: Data())
-        FileManager.default.createFile(atPath: mdURL.path, contents: Data())
+        let userAudioURL = userFolder.appendingPathComponent("unrelated.m4a")
+        FileManager.default.createFile(atPath: userAudioURL.path, contents: Data())
 
-        service.cleanupOrphanedAudioFiles(in: folder)
+        let tempAudioURL = try service.temporaryAudioURL(startTime: date("2026-03-13T14:00:00Z"))
+        FileManager.default.createFile(atPath: tempAudioURL.path, contents: Data())
 
-        XCTAssertFalse(FileManager.default.fileExists(atPath: m4aURL.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: mdURL.path))
+        service.cleanupTemporaryAudioFiles()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: tempAudioURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: userAudioURL.path))
     }
 
-    func testCleanupOrphanedAudioFilesIsNoOpForMissingFolder() {
-        let service = StorageService()
-        let missing = URL(fileURLWithPath: "/tmp/nonexistent-\(UUID().uuidString)")
-        service.cleanupOrphanedAudioFiles(in: missing)
+    func testCleanupTemporaryAudioFilesIsNoOpForMissingFolder() {
+        let missing = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nonexistent-\(UUID().uuidString)", isDirectory: true)
+        let service = StorageService(temporaryDirectory: missing)
+
+        service.cleanupTemporaryAudioFiles()
     }
 
     func testDeleteFileUsesPermanentRemovalInsteadOfTrash() {

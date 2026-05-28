@@ -34,9 +34,9 @@ Most transcription tools trap your notes in another app or SaaS dashboard. TokDo
 
 - Record meetings, calls, demos, and research audio from system audio or your microphone
 - Get timestamped markdown with YAML front matter (calendar metadata, attendees, links)
-- No audio files kept — transcription in, markdown out, audio deleted permanently
+- No audio files kept — temporary capture audio is deleted permanently after transcription
 - No dependencies, no accounts, no API keys
-- ~1,200 lines of Swift, no external packages
+- ~1,600 lines of Swift, no external packages
 
 ## How it works
 
@@ -46,7 +46,7 @@ Most transcription tools trap your notes in another app or SaaS dashboard. TokDo
 4. Stop when done
 5. TokDown transcribes and saves a `.md` file — typically in under a minute
 6. If system-audio capture never receives any audio, TokDown reports an error instead of saving an empty transcript
-7. The audio file is deleted permanently
+7. The temporary audio file is deleted permanently
 
 Transcripts are saved to `~/Documents/Transcripts/` by default:
 
@@ -56,6 +56,8 @@ Transcripts are saved to `~/Documents/Transcripts/` by default:
 ```
 
 Meeting recordings use the calendar event title. Manual recordings infer a title from the transcript text. If two recordings share the same title within the same minute, TokDown appends `-2`, `-3`, and so on instead of overwriting the earlier file.
+
+Raw audio is recorded to a TokDown-owned temporary session folder, used for transcription, then permanently deleted. The selected transcript folder receives markdown files only.
 
 ## Transcript format
 
@@ -140,7 +142,7 @@ On first relevant use, macOS may prompt for:
 
 ## Stack
 
-~1,200 lines of Swift 6. No external dependencies.
+~1,600 lines of Swift 6. No external dependencies.
 
 | Framework | Purpose |
 |---|---|
@@ -161,7 +163,7 @@ Sources/TokDown/
 ├── RecordingService.swift      # AVAudioRecorder (mic fallback)
 ├── TranscriptionService.swift  # SpeechTranscriber + SpeechAnalyzer pipeline
 ├── TranscriptFormatter.swift   # Front matter + markdown rendering
-├── StorageService.swift        # File output and audio cleanup
+├── StorageService.swift        # Transcript paths and temporary audio cleanup
 ├── CalendarService.swift       # EventKit meetings
 ├── SettingsStore.swift         # User preferences
 ├── AppModels.swift             # Data types

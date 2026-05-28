@@ -10,6 +10,7 @@ final class MenuBarCoordinator {
     private(set) var activeTitle: String?
     private(set) var upcomingMeetings: [UpcomingMeeting] = []
     var statusMessage: String?
+    private(set) var statusMessageIsError = true
 
     let settingsStore: SettingsStore
 
@@ -22,10 +23,10 @@ final class MenuBarCoordinator {
 
     private var startTime: Date?
     private var currentMeeting: UpcomingMeeting?
-    private var currentArtifacts: SessionArtifacts?
     private var currentAudioSource: AudioSource?
     private var timerTask: Task<Void, Never>?
-    nonisolated(unsafe) private var calendarChangeObserver: NSObjectProtocol?
+    private var isHandlingRecordingAction = false
+    @ObservationIgnored private var calendarChangeObserver: NSObjectProtocol?
 
     var menuTitle: String {
         state == .recording ? formattedElapsed : ""
@@ -45,7 +46,7 @@ final class MenuBarCoordinator {
         }
     }
 
-    deinit {
+    isolated deinit {
         if let observer = calendarChangeObserver {
             NotificationCenter.default.removeObserver(observer)
         }
@@ -54,24 +55,29 @@ final class MenuBarCoordinator {
     // MARK: - Meetings
 
     func loadMeetings() async {
-        storageService.cleanupOrphanedAudioFiles(in: settingsStore.saveFolderURL)
+        storageService.cleanupTemporaryAudioFiles()
         let result = await calendarService.upcomingMeetings(limit: 3)
         upcomingMeetings = result.meetings
-        statusMessage = Self.meetingsStatusMessage(
+        let updatedStatusMessage = Self.meetingsStatusMessage(
             for: result.accessState,
             currentStatusMessage: statusMessage
         )
+        if updatedStatusMessage != statusMessage {
+            setStatusMessage(updatedStatusMessage)
+        }
     }
 
     // MARK: - Recording
 
     func startRecording(meeting: UpcomingMeeting? = nil) async {
-        guard state == .idle else { return }
-        statusMessage = nil
+        guard state == .idle, !isHandlingRecordingAction else { return }
+        isHandlingRecordingAction = true
+        defer { isHandlingRecordingAction = false }
+        setStatusMessage(nil)
 
         let speechAccessState = await transcriptionService.speechRecognitionAccessState(requestingIfNeeded: true)
         guard speechAccessState == .authorized else {
-            statusMessage = speechAccessState.failureMessage
+            setStatusMessage(speechAccessState.failureMessage)
             return
         }
 
@@ -79,43 +85,58 @@ final class MenuBarCoordinator {
         let label = meeting?.title ?? sessionAudioSource.title
         let useSystemAudio = sessionAudioSource == .systemAudio
 
+        if await transcriptionService.modelNeedsDownload() {
+            setStatusMessage("Preparing local speech model...", isError: false)
+        }
+
+        do {
+            try await transcriptionService.ensureModelAvailable()
+        } catch {
+            setStatusMessage("Speech model unavailable: \(error.localizedDescription)")
+            return
+        }
+
+        setStatusMessage(nil)
+
         if !useSystemAudio {
             guard await recordingService.requestMicrophonePermission() else {
-                statusMessage = "Microphone permission denied."
+                setStatusMessage("Microphone permission denied.")
                 return
             }
         }
 
+        var pendingAudioURL: URL?
         do {
             let now = Date()
-            let artifacts = try storageService.sessionArtifacts(
-                folderBase: settingsStore.saveFolderURL,
-                title: label,
-                startTime: now
-            )
+            let audioURL = try storageService.temporaryAudioURL(startTime: now)
+            pendingAudioURL = audioURL
 
             if useSystemAudio {
-                try await systemAudioService.startCapture(to: artifacts.audioURL)
+                try await systemAudioService.startCapture(to: audioURL)
             } else {
-                try recordingService.startRecording(to: artifacts.audioURL)
+                try recordingService.startRecording(to: audioURL)
             }
 
             startTime = now
             activeTitle = label
             currentMeeting = meeting
-            currentArtifacts = artifacts
             currentAudioSource = sessionAudioSource
             state = .recording
             elapsedSeconds = 0
             startElapsedTimer()
         } catch {
+            if let pendingAudioURL {
+                storageService.deleteFile(pendingAudioURL)
+            }
             currentMeeting = nil
-            statusMessage = "Failed: \(error.localizedDescription)"
+            setStatusMessage("Failed: \(error.localizedDescription)")
         }
     }
 
     func stopRecording() async {
-        guard state == .recording else { return }
+        guard state == .recording, !isHandlingRecordingAction else { return }
+        isHandlingRecordingAction = true
+        defer { isHandlingRecordingAction = false }
         stopElapsedTimer()
 
         let audioURL: URL?
@@ -123,11 +144,10 @@ final class MenuBarCoordinator {
             do {
                 audioURL = try await systemAudioService.stopCapture()
             } catch {
-                statusMessage = error.localizedDescription
+                setStatusMessage(error.localizedDescription)
                 startTime = nil
                 activeTitle = nil
                 currentMeeting = nil
-                currentArtifacts = nil
                 currentAudioSource = nil
                 state = .idle
                 await loadMeetings()
@@ -138,11 +158,10 @@ final class MenuBarCoordinator {
         }
 
         guard let audioURL else {
-            statusMessage = "No audio file."
+            setStatusMessage("No audio file.")
             startTime = nil
             activeTitle = nil
             currentMeeting = nil
-            currentArtifacts = nil
             currentAudioSource = nil
             state = .idle
             return
@@ -151,9 +170,8 @@ final class MenuBarCoordinator {
         let recordingEndTime = Date()
         state = .transcribing
 
-        // Surface model download before transcription starts
         if await transcriptionService.modelNeedsDownload() {
-            statusMessage = "Downloading speech model…"
+            setStatusMessage("Preparing local speech model...", isError: false)
         }
 
         // Transcribe
@@ -166,14 +184,15 @@ final class MenuBarCoordinator {
             fullText = result.fullText
             lines = result.lines
             transcriptionSucceeded = true
+            setStatusMessage(nil)
         } catch {
-            statusMessage = "Transcription: \(error.localizedDescription)"
+            setStatusMessage("Transcription: \(error.localizedDescription)")
             fullText = "(Transcription failed)"
         }
 
         // Save transcript
         var didWriteTranscript = false
-        if let artifacts = currentArtifacts, let recordingStartTime = startTime {
+        if let recordingStartTime = startTime {
             let document = transcriptFormatter.makeDocument(
                 fallbackTitle: activeTitle,
                 startTime: recordingStartTime,
@@ -187,28 +206,35 @@ final class MenuBarCoordinator {
                 lines: lines
             )
             do {
-                try storageService.writeTranscript(document.markdown, to: artifacts.transcriptURL)
+                let transcriptURL = try storageService.transcriptURL(
+                    folderBase: settingsStore.saveFolderURL,
+                    title: document.title,
+                    startTime: recordingStartTime
+                )
+                try storageService.writeTranscript(document.markdown, to: transcriptURL)
                 didWriteTranscript = true
             } catch {
-                statusMessage = "Save failed: \(error.localizedDescription)"
+                setStatusMessage("Save failed: \(error.localizedDescription)")
             }
         } else {
-            statusMessage = "Save failed: missing session artifacts."
+            setStatusMessage("Save failed: missing recording start time.")
         }
 
         let cleanupResult = storageService.deleteFile(audioURL)
-        statusMessage = Self.finalStatusMessage(
+        let finalStatusMessage = Self.finalStatusMessage(
             currentStatusMessage: statusMessage,
             didWriteTranscript: didWriteTranscript,
             cleanupResult: cleanupResult,
             transcriptionSucceeded: transcriptionSucceeded
         )
+        if finalStatusMessage != statusMessage {
+            setStatusMessage(finalStatusMessage)
+        }
 
         // Reset
         startTime = nil
         activeTitle = nil
         currentMeeting = nil
-        currentArtifacts = nil
         currentAudioSource = nil
         state = .idle
 
@@ -218,6 +244,11 @@ final class MenuBarCoordinator {
 
     func openRecordingsFolder() {
         storageService.openFolder(settingsStore.saveFolderURL)
+    }
+
+    private func setStatusMessage(_ message: String?, isError: Bool = true) {
+        statusMessage = message
+        statusMessageIsError = message == nil ? true : isError
     }
 
     // MARK: - Timer
@@ -251,18 +282,26 @@ final class MenuBarCoordinator {
         for accessState: CalendarService.CalendarReadAccessState,
         currentStatusMessage: String?
     ) -> String? {
+        if let currentStatusMessage,
+           !isCalendarStatusMessage(currentStatusMessage) {
+            return currentStatusMessage
+        }
+
         switch accessState {
         case .allowed:
-            if currentStatusMessage == "Calendar access upgrade required to read upcoming meetings."
-                || currentStatusMessage == "Calendar access denied. Enable Calendar access in System Settings to load upcoming meetings." {
-                return nil
-            }
-            return currentStatusMessage
+            return nil
         case .upgradeRequired:
-            return "Calendar access upgrade required to read upcoming meetings."
+            return calendarUpgradeMessage
         case .denied:
-            return "Calendar access denied. Enable Calendar access in System Settings to load upcoming meetings."
+            return calendarDeniedMessage
         }
+    }
+
+    nonisolated private static let calendarUpgradeMessage = "Calendar access upgrade required to read upcoming meetings."
+    nonisolated private static let calendarDeniedMessage = "Calendar access denied. Enable Calendar access in System Settings to load upcoming meetings."
+
+    nonisolated private static func isCalendarStatusMessage(_ message: String) -> Bool {
+        message == calendarUpgradeMessage || message == calendarDeniedMessage
     }
 
     nonisolated static func finalStatusMessage(
@@ -274,11 +313,11 @@ final class MenuBarCoordinator {
         switch cleanupResult {
         case let .failed(message):
             return didWriteTranscript
-                ? "Saved transcript, but failed to delete audio: \(message)"
+                ? "Saved transcript, but failed to delete temporary audio: \(message)"
                 : "Cleanup failed: \(message)"
         case .deleted:
             if !transcriptionSucceeded && currentStatusMessage == nil {
-                return "Transcription failed. Audio was deleted."
+                return "Transcription failed. Temporary audio was deleted."
             }
             return currentStatusMessage
         }

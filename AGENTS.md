@@ -11,6 +11,7 @@ Core product constraints:
 - no external dependencies
 - no API keys
 - audio files are permanently deleted after transcription
+- raw audio stays in TokDown-owned temporary storage, never the user-selected transcript folder
 - output is plain markdown in a user-selected folder
 
 ## Repo layout
@@ -65,7 +66,7 @@ Core product constraints:
 - `Sources/TokDown/RecordingService.swift` — microphone capture fallback
 - `Sources/TokDown/TranscriptionService.swift` — Apple SpeechTranscriber pipeline
 - `Sources/TokDown/TranscriptFormatter.swift` — front matter, title inference, and markdown rendering
-- `Sources/TokDown/StorageService.swift` — transcript output, deletion, and orphan `.m4a` cleanup on startup
+- `Sources/TokDown/StorageService.swift` — transcript paths, deletion, and temporary `.m4a` cleanup on startup
 - `Sources/TokDown/CalendarService.swift` — upcoming meetings and calendar permissions
 - `scripts/build-app.sh` — build, bundle, sign, and zip release artifact
 
@@ -96,7 +97,7 @@ Artifacts:
 
 ## Build, test, and lint commands
 
-There is no lint setup yet, but there is a focused XCTest suite covering transcript formatting, calendar access decisions, coordinator status handling, menu bar icon presentation, storage collision/cleanup behavior, orphaned audio file cleanup, system-audio rollback cleanup, system-audio zero-capture error reporting, speech-permission mapping, microphone permission-state mapping, and settings persistence.
+There is no lint setup yet, but there is a focused XCTest suite covering transcript formatting, calendar access decisions, coordinator status handling, menu bar icon presentation, storage collision/cleanup behavior, temporary audio cleanup, system-audio rollback cleanup, system-audio zero-capture error reporting, speech-permission mapping, microphone permission-state mapping, and settings persistence.
 
 Use these checks before submitting changes:
 
@@ -155,13 +156,13 @@ Do not:
 - Target platform: `macOS 26+`
 - Uses `@Observable` (Observation framework) — not `ObservableObject`/`@Published`. Views use `@State`/`@Environment`, not `@StateObject`/`@EnvironmentObject`.
 - The app uses Apple’s newer on-device SpeechTranscriber pipeline.
-- Speech recognition permission is requested before recording starts because the product promise is transcript-first, not raw-audio capture.
+- Speech recognition permission and SpeechTranscriber asset availability are checked before recording starts because the product promise is transcript-first, not raw-audio capture.
 - ScreenCaptureKit still requires a minimal video config even for audio-only capture.
 - System-audio capture registers both `.screen` and `.audio` outputs and prefers the hovered display, then `NSScreen.main`, instead of blindly using the first ScreenCaptureKit display; this avoids sessions that appear to record but never receive audio samples.
 - Audio capture uses `Mutex` (Synchronization framework) for session tracking and a serial `DispatchQueue` to serialize writer access across the capture callback and `finish()`.
 - `SystemAudioService.stopCapture()` is `async throws` — propagates `SystemAudioError.noAudioCaptured` when no system-audio samples were appended and `SystemAudioError.writeFailed` when `AVAssetWriter` finishes in `.failed` state.
 - `TranscriptionService.transcribe()` has a 300-second timeout implemented as a `withThrowingTaskGroup` race; throws `TranscriptionError.timeout` if the pipeline stalls.
-- `MenuBarCoordinator` observes `EKEventStore.changedNotification` to auto-refresh meetings; only acts when `state == .idle` to avoid clobbering recording status messages. `loadMeetings()` also calls `StorageService.cleanupOrphanedAudioFiles` on each invocation to delete any `.m4a` files left behind by sessions that crashed during transcription.
+- `MenuBarCoordinator` observes `EKEventStore.changedNotification` to auto-refresh meetings; only acts when `state == .idle` to avoid clobbering recording status messages. `loadMeetings()` also calls `StorageService.cleanupTemporaryAudioFiles` on each invocation to delete any `.m4a` files left behind in TokDown-owned temporary storage.
 - `SettingsStore.init(defaults:)` accepts a `UserDefaults` suite for test isolation; use `UserDefaults(suiteName: UUID().uuidString)` in tests.
 - Menu bar UI uses `MenuBarExtra` with `.menu` style, so layout behavior is constrained.
 - Permission prompts and TCC behavior depend on code signing; the build script signs the app automatically.
@@ -199,7 +200,8 @@ Manual verification checklist:
 - transcript markdown is written to the chosen folder
 - selected meetings add calendar front matter to the transcript
 - transcript filenames stay date-first, use a meaningful title instead of a generic `Recording`, and avoid overwriting same-minute collisions
-- audio file is permanently deleted after transcription instead of being moved to Trash
+- temporary audio file is permanently deleted after transcription instead of being moved to Trash
+- the selected transcript folder contains markdown output only, not temporary audio
 - settings window opens, saves changes, and persists the selected audio source
 - permission prompts and denied/upgrade-required status messages still make sense for the changed workflow
 - system-audio recordings fail loudly instead of silently writing `(No transcript)` when no audio samples arrive

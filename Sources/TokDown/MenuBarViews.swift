@@ -46,7 +46,9 @@ struct MenuBarContentView: View {
             }
 
             if let msg = coordinator.statusMessage {
-                Text(msg).font(.caption).foregroundStyle(.red)
+                Text(msg)
+                    .font(.caption)
+                    .foregroundStyle(coordinator.statusMessageIsError ? Color.red : Color.secondary)
             }
 
             Divider()

@@ -22,9 +22,19 @@ final class MenuBarCoordinatorTests: XCTestCase {
         XCTAssertEqual(
             MenuBarCoordinator.meetingsStatusMessage(
                 for: .allowed,
-                currentStatusMessage: "Saved transcript, but failed to delete audio: permissions"
+                currentStatusMessage: "Saved transcript, but failed to delete temporary audio: permissions"
             ),
-            "Saved transcript, but failed to delete audio: permissions"
+            "Saved transcript, but failed to delete temporary audio: permissions"
+        )
+    }
+
+    func testMeetingsStatusMessagePreservesNonCalendarMessageWhenAccessDenied() {
+        XCTAssertEqual(
+            MenuBarCoordinator.meetingsStatusMessage(
+                for: .denied,
+                currentStatusMessage: "Transcription failed. Temporary audio was deleted."
+            ),
+            "Transcription failed. Temporary audio was deleted."
         )
     }
 
@@ -54,7 +64,7 @@ final class MenuBarCoordinatorTests: XCTestCase {
                 cleanupResult: .failed("busy"),
                 transcriptionSucceeded: true
             ),
-            "Saved transcript, but failed to delete audio: busy"
+            "Saved transcript, but failed to delete temporary audio: busy"
         )
 
         XCTAssertEqual(
@@ -76,7 +86,7 @@ final class MenuBarCoordinatorTests: XCTestCase {
                 cleanupResult: .deleted,
                 transcriptionSucceeded: false
             ),
-            "Transcription failed. Audio was deleted."
+            "Transcription failed. Temporary audio was deleted."
         )
     }
 

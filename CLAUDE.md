@@ -19,13 +19,13 @@ bash scripts/build-app.sh debug && open TokDown.app
 - ScreenCaptureKit needs video config even for audio-only (2x2 @ 1fps), and TokDown registers both screen + audio outputs so system-audio sessions don't silently run with zero captured samples.
 - Core Audio Taps migration blocked by libdispatch main-thread assertion crash on macOS 26 — tried AVAssetWriter, AVAudioFile, ExtAudioFile, all crash identically. Needs Xcode thread sanitizer debugging. Track via AudioCap (insidegui/AudioCap) patterns.
 - Code signing required for TCC permissions
-- Speech recognition permission is preflighted before recording can start.
+- Speech recognition permission and local SpeechTranscriber asset availability are preflighted before recording can start.
 - Calendar meeting loading requires full access; write-only access should surface an upgrade-required state.
 - Raw audio cleanup must permanently remove files, not move them to Trash.
 - `SystemAudioService.stopCapture()` is `async throws` — callers must `try await`; throws `SystemAudioError.noAudioCaptured` when no system-audio samples were appended, and `SystemAudioError.writeFailed` if `AVAssetWriter` finishes in `.failed` state.
-- `nonisolated(unsafe)` is required for `var` properties accessed in `deinit` of `@Observable` classes — `nonisolated` alone is rejected by the `@ObservationTracked` macro expansion, despite the compiler warning suggesting it.
+- For non-observed properties accessed in `deinit` of `@Observable` classes, prefer `@ObservationIgnored` plus `isolated deinit` over `nonisolated(unsafe)`.
 - `TranscriptionService.transcribe()` has a 300-second timeout via `withThrowingTaskGroup`; throws `TranscriptionError.timeout` if the speech pipeline stalls.
 - `SettingsStore.init(defaults:)` accepts a `UserDefaults` suite for test injection; production code uses `.standard` by default.
 - `SystemAudioService` prefers the hovered display, then `NSScreen.main`, instead of blindly using the first ScreenCaptureKit display; arbitrary display selection can produce empty system-audio sessions when output routes move around.
 - `SpeechAnalyzer` keep-alive: `_ = analyzer` must appear **after** the `for try await` loop, not before it. ARC determines lifetime by last-use; placing it before the loop lets the compiler drop the analyzer before the pipeline drains.
-- `StorageService.cleanupOrphanedAudioFiles(in:)` is called from `loadMeetings()` and deletes any `.m4a` files in the save folder — crash-orphaned audio from sessions that died during transcription is cleaned on the next menu open.
+- `StorageService` records raw audio under a TokDown-owned temporary session folder, then writes only the final `.md` transcript to the selected folder. `cleanupTemporaryAudioFiles()` is called from `loadMeetings()` and only deletes `.m4a` files from TokDown temporary storage.
