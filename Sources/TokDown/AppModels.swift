@@ -30,10 +30,27 @@ enum AudioSource: String, Codable, CaseIterable, Identifiable {
 struct AppSettings: Codable, Sendable {
     var saveFolderPath: String
     var audioSource: AudioSource
+    /// When recording system audio, also capture the microphone in parallel and fall
+    /// back to it if the system-audio transcript comes back empty (e.g. a route the tap
+    /// can't reach). Resilience against silent system captures.
+    var systemAudioMicFallback: Bool
 
-    init(saveFolderPath: String, audioSource: AudioSource = .systemAudio) {
+    init(saveFolderPath: String, audioSource: AudioSource = .systemAudio, systemAudioMicFallback: Bool = false) {
         self.saveFolderPath = saveFolderPath
         self.audioSource = audioSource
+        self.systemAudioMicFallback = systemAudioMicFallback
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case saveFolderPath, audioSource, systemAudioMicFallback
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        saveFolderPath = try container.decode(String.self, forKey: .saveFolderPath)
+        audioSource = try container.decodeIfPresent(AudioSource.self, forKey: .audioSource) ?? .systemAudio
+        // Backward-compatible: older persisted settings (V2) lack this key.
+        systemAudioMicFallback = try container.decodeIfPresent(Bool.self, forKey: .systemAudioMicFallback) ?? false
     }
 }
 

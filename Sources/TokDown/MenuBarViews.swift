@@ -16,6 +16,15 @@ struct MenuBarContentView: View {
                 Button(action: { Task { await coordinator.stopRecording() } }) {
                     Label("Stop Recording", systemImage: "stop.circle")
                 }
+                if let warning = coordinator.captureWarning {
+                    Label {
+                        Text(warning)
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                }
             } else if coordinator.state == .transcribing {
                 Label {
                     Text("Transcribing...")
@@ -52,6 +61,12 @@ struct MenuBarContentView: View {
             }
 
             Divider()
+
+            if coordinator.latestTranscriptURL != nil {
+                Button(action: { coordinator.openLatestTranscript() }) {
+                    Label("Open Latest Transcript", systemImage: "doc.text")
+                }
+            }
 
             Button(action: { coordinator.openRecordingsFolder() }) {
                 Label("Open Folder", systemImage: "folder")
@@ -91,6 +106,14 @@ struct SettingsWindowView: View {
                 .pickerStyle(.segmented)
 
                 Text("Choose whether TokDown records system audio or microphone input by default.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Toggle("Capture microphone as fallback for system audio", isOn: binding(for: \.systemAudioMicFallback))
+                    .font(.callout)
+
+                Text("If a system-audio recording comes back empty (e.g. lid closed, or audio on another device), TokDown falls back to the microphone instead of losing the session.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

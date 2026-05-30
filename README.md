@@ -46,7 +46,8 @@ Most transcription tools trap your notes in another app or SaaS dashboard. TokDo
 4. Stop when done
 5. TokDown transcribes and saves a `.md` file — typically in under a minute
 6. If system-audio capture never receives any audio, TokDown reports an error instead of saving an empty transcript
-7. The temporary audio file is deleted permanently
+7. The latest transcript can be opened directly from the menu bar
+8. On a successful transcript the temporary audio file is deleted permanently; if the transcript comes back empty, the audio is **kept** in the save folder so it can be re-transcribed or listened back
 
 Transcripts are saved to `~/Documents/Transcripts/` by default:
 
@@ -57,7 +58,9 @@ Transcripts are saved to `~/Documents/Transcripts/` by default:
 
 Meeting recordings use the calendar event title. Manual recordings infer a title from the transcript text. If two recordings share the same title within the same minute, TokDown appends `-2`, `-3`, and so on instead of overwriting the earlier file.
 
-Raw audio is recorded to a TokDown-owned temporary session folder, used for transcription, then permanently deleted. The selected transcript folder receives markdown files only.
+Raw audio is recorded to a TokDown-owned temporary session folder, used for transcription, then permanently deleted — **except** when transcription returns nothing usable, in which case the audio is moved into the save folder beside where the transcript would be, so a failed capture is recoverable instead of lost. The selected transcript folder otherwise receives markdown files only.
+
+After a successful save, the menu bar shows **Open Latest Transcript** so the newest markdown file is one click away without changing the app's folder-first workflow.
 
 ## Transcript format
 
@@ -135,8 +138,8 @@ Open **Settings** from the menu bar to change the save folder and persist the de
 
 On first relevant use, macOS may prompt for:
 
-- **Screen Recording** — captures system audio via ScreenCaptureKit when System Audio is selected
-- **Microphone** — captures live microphone input when Microphone is selected
+- **Audio Recording** — captures system audio via a Core Audio process tap when System Audio is selected (survives lid-closed / display-off, unlike screen capture)
+- **Microphone** — captures live microphone input when Microphone is selected, or as a fallback for System Audio when that option is enabled
 - **Speech Recognition** — checked before recording starts because transcription is required for the end-to-end flow
 - **Calendar** (optional, full access) — shows upcoming meetings in the menu; write-only access is not enough to read them
 
@@ -147,7 +150,7 @@ On first relevant use, macOS may prompt for:
 | Framework | Purpose |
 |---|---|
 | Speech (SpeechTranscriber) | On-device transcription — new in macOS 26 |
-| ScreenCaptureKit | System audio capture |
+| Core Audio (process tap) | System audio capture — `AudioHardwareCreateProcessTap` + aggregate device |
 | AVFoundation | Audio recording and file I/O |
 | EventKit | Calendar meeting integration |
 
@@ -159,7 +162,7 @@ Sources/TokDown/
 ├── MenuBarCoordinator.swift    # State machine (idle → recording → transcribing)
 ├── MenuBarIconView.swift       # Custom menu bar icon states
 ├── MenuBarViews.swift          # Menu bar + Settings window
-├── SystemAudioService.swift    # ScreenCaptureKit audio capture
+├── SystemAudioService.swift    # Core Audio process-tap capture + level metering
 ├── RecordingService.swift      # AVAudioRecorder (mic fallback)
 ├── TranscriptionService.swift  # SpeechTranscriber + SpeechAnalyzer pipeline
 ├── TranscriptFormatter.swift   # Front matter + markdown rendering

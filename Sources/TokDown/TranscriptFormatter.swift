@@ -6,6 +6,17 @@ struct TranscriptDocument: Sendable {
 }
 
 struct TranscriptFormatter {
+    static let emptyPlaceholder = "(No transcript)"
+    static let failedPlaceholder = "(Transcription failed)"
+
+    /// True when `text` carries no usable transcript: blank, or one of the placeholder
+    /// sentinels. Used to decide whether the source audio is worth keeping (task: retain
+    /// audio on empty transcript) rather than deleting it.
+    static func isPlaceholder(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty || trimmed == emptyPlaceholder || trimmed == failedPlaceholder
+    }
+
     private let timeZone: TimeZone
 
     init(timeZone: TimeZone = .current) {
@@ -100,7 +111,7 @@ struct TranscriptFormatter {
 
     private func makeBody(fullText: String, lines: [TranscriptLine]) -> String {
         if lines.isEmpty {
-            return trimmedOrNil(fullText) ?? "(No transcript)"
+            return trimmedOrNil(fullText) ?? Self.emptyPlaceholder
         }
 
         return collapseSegments(lines)
@@ -163,7 +174,7 @@ struct TranscriptFormatter {
             return nil
         }
 
-        if normalized == "(Transcription failed)" || normalized == "(No transcript)" {
+        if normalized == Self.failedPlaceholder || normalized == Self.emptyPlaceholder {
             return nil
         }
 

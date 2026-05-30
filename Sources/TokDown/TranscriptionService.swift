@@ -82,6 +82,12 @@ final class TranscriptionService {
     func transcribe(audioURL: URL) async throws -> (fullText: String, lines: [TranscriptLine]) {
         try await ensureModelAvailable()
 
+        // Scale the watchdog to the recording length. A fixed 5-min cap silently
+        // failed long recordings ("(Transcription failed)" on good audio); on-device
+        // transcription runs faster than real time, so duration + generous slack is
+        // a safe upper bound that still catches a genuinely hung analyzer.
+        let timeoutSeconds = Self.transcriptionTimeoutSeconds(forAudioAt: audioURL)
+
         return try await withThrowingTaskGroup(of: (String, [TranscriptLine]).self) { group in
             group.addTask {
                 let transcriber = SpeechTranscriber(
@@ -109,7 +115,7 @@ final class TranscriptionService {
             }
 
             group.addTask {
-                try await Task.sleep(for: .seconds(300))
+                try await Task.sleep(for: .seconds(timeoutSeconds))
                 throw TranscriptionError.timeout
             }
 
@@ -119,6 +125,32 @@ final class TranscriptionService {
             }
             return result
         }
+    }
+
+    /// Watchdog budget: at least 5 min, otherwise ~2x the audio duration plus a
+    /// 60s floor for model warm-up. Falls back to a long default if duration is
+    /// unreadable rather than risking a premature timeout.
+    nonisolated static func transcriptionTimeoutSeconds(forAudioAt url: URL) -> Int {
+        guard let duration = audioDurationSeconds(at: url), duration > 0 else {
+            return unknownDurationTimeoutSeconds
+        }
+        return transcriptionTimeoutSeconds(forDurationSeconds: duration)
+    }
+
+    /// Long default when duration is unreadable — never risk a premature timeout on
+    /// a recording we simply couldn't measure.
+    nonisolated static let unknownDurationTimeoutSeconds = 1_800
+
+    nonisolated static func transcriptionTimeoutSeconds(forDurationSeconds duration: Double) -> Int {
+        guard duration > 0 else { return unknownDurationTimeoutSeconds }
+        return max(300, Int(duration * 2) + 60)
+    }
+
+    private nonisolated static func audioDurationSeconds(at url: URL) -> Double? {
+        guard let file = try? AVAudioFile(forReading: url) else { return nil }
+        let sampleRate = file.fileFormat.sampleRate
+        guard sampleRate > 0 else { return nil }
+        return Double(file.length) / sampleRate
     }
 }
 

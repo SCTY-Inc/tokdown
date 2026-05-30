@@ -106,6 +106,14 @@ Quarterly planning kickoff and budget review with hiring updates.
 """)
     }
 
+    func testIsPlaceholderRecognizesEmptyAndSentinelTranscripts() {
+        XCTAssertTrue(TranscriptFormatter.isPlaceholder(""))
+        XCTAssertTrue(TranscriptFormatter.isPlaceholder("   \n "))
+        XCTAssertTrue(TranscriptFormatter.isPlaceholder(TranscriptFormatter.emptyPlaceholder))
+        XCTAssertTrue(TranscriptFormatter.isPlaceholder(TranscriptFormatter.failedPlaceholder))
+        XCTAssertFalse(TranscriptFormatter.isPlaceholder("Real meeting content."))
+    }
+
     private func date(_ value: String) -> Date {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]

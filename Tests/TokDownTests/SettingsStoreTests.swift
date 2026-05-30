@@ -38,4 +38,24 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(store.settings.audioSource, .systemAudio)
         XCTAssertTrue(store.settings.saveFolderPath.contains("Transcripts"))
     }
+
+    func testMicFallbackRoundTrips() {
+        let suite = makeSuite()
+        let store = SettingsStore(defaults: suite)
+
+        store.settings.systemAudioMicFallback = true
+        store.save()
+
+        XCTAssertTrue(SettingsStore(defaults: suite).settings.systemAudioMicFallback)
+    }
+
+    func testLegacySettingsWithoutMicFallbackKeyDecodeToFalse() throws {
+        // Settings persisted before the mic-fallback key existed must still load.
+        let legacyJSON = #"{"saveFolderPath":"/tmp/custom","audioSource":"systemAudio"}"#
+        let settings = try JSONDecoder().decode(AppSettings.self, from: Data(legacyJSON.utf8))
+
+        XCTAssertEqual(settings.saveFolderPath, "/tmp/custom")
+        XCTAssertEqual(settings.audioSource, .systemAudio)
+        XCTAssertFalse(settings.systemAudioMicFallback)
+    }
 }

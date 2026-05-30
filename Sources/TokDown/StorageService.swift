@@ -34,6 +34,34 @@ final class StorageService {
         try text.write(to: url, atomically: true, encoding: .utf8)
     }
 
+    /// Moves a temporary recording into the save folder so it survives a failed/empty
+    /// transcript and can be re-transcribed or listened back. The audio is ground truth;
+    /// the transcript is the disposable, re-derivable artifact. Returns the kept URL, or
+    /// nil if the move failed.
+    func retainAudio(_ audioURL: URL, baseName: String, in folder: URL) -> URL? {
+        guard fileManager.fileExists(atPath: audioURL.path) else { return nil }
+        do {
+            try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
+        } catch {
+            return nil
+        }
+
+        let ext = audioURL.pathExtension.isEmpty ? "m4a" : audioURL.pathExtension
+        var destination = folder.appendingPathComponent("\(baseName).\(ext)")
+        var suffix = 2
+        while fileManager.fileExists(atPath: destination.path) {
+            destination = folder.appendingPathComponent("\(baseName)-\(suffix).\(ext)")
+            suffix += 1
+        }
+
+        do {
+            try fileManager.moveItem(at: audioURL, to: destination)
+            return destination
+        } catch {
+            return nil
+        }
+    }
+
     func cleanupTemporaryAudioFiles() {
         guard let contents = try? fileManager.contentsOfDirectory(at: temporaryAudioFolder, includingPropertiesForKeys: nil) else { return }
         for url in contents where url.pathExtension == "m4a" {
@@ -52,6 +80,10 @@ final class StorageService {
     }
 
     func openFolder(_ url: URL) {
+        NSWorkspace.shared.open(url)
+    }
+
+    func openFile(_ url: URL) {
         NSWorkspace.shared.open(url)
     }
 

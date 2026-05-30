@@ -78,6 +78,43 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertFalse(message.isEmpty)
     }
 
+    func testRetainAudioMovesFileIntoSaveFolder() throws {
+        let tempFolder = try makeTempFolder()
+        let saveFolder = try makeTempFolder()
+        let service = StorageService()
+
+        let audioURL = tempFolder.appendingPathComponent("temp.m4a")
+        try Data("audio".utf8).write(to: audioURL)
+
+        let kept = service.retainAudio(audioURL, baseName: "2026-05-30_14-50_Syra", in: saveFolder)
+
+        XCTAssertEqual(kept?.lastPathComponent, "2026-05-30_14-50_Syra.m4a")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: kept!.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: audioURL.path), "source audio should be moved, not copied")
+    }
+
+    func testRetainAudioDeduplicatesNameOnCollision() throws {
+        let tempFolder = try makeTempFolder()
+        let saveFolder = try makeTempFolder()
+        let service = StorageService()
+
+        try Data("existing".utf8).write(to: saveFolder.appendingPathComponent("clip.m4a"))
+        let audioURL = tempFolder.appendingPathComponent("temp.m4a")
+        try Data("audio".utf8).write(to: audioURL)
+
+        let kept = service.retainAudio(audioURL, baseName: "clip", in: saveFolder)
+
+        XCTAssertEqual(kept?.lastPathComponent, "clip-2.m4a")
+    }
+
+    func testRetainAudioReturnsNilForMissingSource() throws {
+        let saveFolder = try makeTempFolder()
+        let service = StorageService()
+        let missing = saveFolder.appendingPathComponent("nope.m4a")
+
+        XCTAssertNil(service.retainAudio(missing, baseName: "x", in: saveFolder))
+    }
+
     private func makeTempFolder() throws -> URL {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

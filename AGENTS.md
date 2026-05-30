@@ -61,8 +61,8 @@ Core product constraints:
 
 - `Sources/TokDown/TokDownApp.swift` — app entry, menu bar scene, settings window
 - `Sources/TokDown/MenuBarCoordinator.swift` — state machine, permission gating, and orchestration
-- `Sources/TokDown/MenuBarViews.swift` — menu bar content and settings UI, including audio source selection
-- `Sources/TokDown/SystemAudioService.swift` — system audio capture via ScreenCaptureKit
+- `Sources/TokDown/MenuBarViews.swift` — menu bar content and settings UI, including latest transcript and audio source selection
+- `Sources/TokDown/SystemAudioService.swift` — system audio capture via a Core Audio process tap (+ live level metering)
 - `Sources/TokDown/RecordingService.swift` — microphone capture fallback
 - `Sources/TokDown/TranscriptionService.swift` — Apple SpeechTranscriber pipeline
 - `Sources/TokDown/TranscriptFormatter.swift` — front matter, title inference, and markdown rendering
@@ -157,11 +157,13 @@ Do not:
 - Uses `@Observable` (Observation framework) — not `ObservableObject`/`@Published`. Views use `@State`/`@Environment`, not `@StateObject`/`@EnvironmentObject`.
 - The app uses Apple’s newer on-device SpeechTranscriber pipeline.
 - Speech recognition permission and SpeechTranscriber asset availability are checked before recording starts because the product promise is transcript-first, not raw-audio capture.
-- ScreenCaptureKit still requires a minimal video config even for audio-only capture.
-- System-audio capture registers both `.screen` and `.audio` outputs and prefers the hovered display, then `NSScreen.main`, instead of blindly using the first ScreenCaptureKit display; this avoids sessions that appear to record but never receive audio samples.
-- Audio capture uses `Mutex` (Synchronization framework) for session tracking and a serial `DispatchQueue` to serialize writer access across the capture callback and `finish()`.
-- `SystemAudioService.stopCapture()` is `async throws` — propagates `SystemAudioError.noAudioCaptured` when no system-audio samples were appended and `SystemAudioError.writeFailed` when `AVAssetWriter` finishes in `.failed` state.
-- `TranscriptionService.transcribe()` has a 300-second timeout implemented as a `withThrowingTaskGroup` race; throws `TranscriptionError.timeout` if the pipeline stalls.
+- The menu exposes the latest saved transcript directly and does not maintain a transcript database. Audio is normally deleted after transcription, but is **retained** in the save folder when the transcript comes back empty/placeholder, so a silent capture is recoverable.
+- System-audio capture uses a **Core Audio process tap** (`AudioHardwareCreateProcessTap` + a private aggregate device anchored to the default output device), not ScreenCaptureKit. The tap anchors to an audio device, so it survives lid-closed / display-off / screen-lock — the failure mode that made the old display-bound SCK path capture silence.
+- `SystemAudioService` meters per-buffer peak amplitude on the IO-proc thread; `MenuBarCoordinator` polls `hasCapturedAudibleSignal()` and shows a live warning if a system-audio capture looks silent past an 8s grace.
+- When "Capture microphone as fallback for system audio" is enabled, a parallel mic recording runs during system-audio sessions; if the system transcript is empty, TokDown transcribes the mic recording instead and tags the source `microphone`.
+- Audio capture writes via `AVAudioFile` inside a Core Audio real-time IO proc (`AudioDeviceCreateIOProcIDWithBlock` with a nil queue → CA-owned thread, not main); `TapWriter` (`@unchecked Sendable`) serializes file access and metering with an `NSLock`.
+- `SystemAudioService.stopCapture()` is `async throws` — propagates `SystemAudioError.noAudioCaptured` when zero frames were written and `SystemAudioError.writeFailed`/`.tapCreationFailed`/`.aggregateCreationFailed` on Core Audio errors.
+- `TranscriptionService.transcribe()` uses a duration-scaled timeout (`max(300, duration×2 + 60)`, or 1800s when duration is unreadable) implemented as a `withThrowingTaskGroup` race; throws `TranscriptionError.timeout` if the pipeline stalls. The old fixed 300s cap false-failed long recordings.
 - `MenuBarCoordinator` observes `EKEventStore.changedNotification` to auto-refresh meetings; only acts when `state == .idle` to avoid clobbering recording status messages. `loadMeetings()` also calls `StorageService.cleanupTemporaryAudioFiles` on each invocation to delete any `.m4a` files left behind in TokDown-owned temporary storage.
 - `SettingsStore.init(defaults:)` accepts a `UserDefaults` suite for test isolation; use `UserDefaults(suiteName: UUID().uuidString)` in tests.
 - Menu bar UI uses `MenuBarExtra` with `.menu` style, so layout behavior is constrained.
