@@ -15,15 +15,17 @@ final class OpusCaptureFile {
         case truncatedFrame(expected: Int, actual: Int)
     }
 
-    let url: URL
+    private(set) var url: URL
+    private let finalizedURL: URL
     private var handle: FileHandle?
 
     init(baseDirectory: URL? = nil) throws {
-        let directory = (baseDirectory ?? FileManager.default.temporaryDirectory)
-            .appendingPathComponent("TokDownCaptures", isDirectory: true)
+        let directory = try Self.captureDirectory(baseDirectory: baseDirectory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
-        url = directory.appendingPathComponent(UUID().uuidString).appendingPathExtension("opusframes")
+        let baseURL = directory.appendingPathComponent(UUID().uuidString)
+        url = baseURL.appendingPathExtension("opusframes").appendingPathExtension("partial")
+        finalizedURL = baseURL.appendingPathExtension("opusframes")
         FileManager.default.createFile(atPath: url.path, contents: nil)
         handle = try FileHandle(forWritingTo: url)
     }
@@ -39,6 +41,13 @@ final class OpusCaptureFile {
         if let handle {
             try handle.close()
             self.handle = nil
+        }
+        if url != finalizedURL {
+            if FileManager.default.fileExists(atPath: finalizedURL.path) {
+                try FileManager.default.removeItem(at: finalizedURL)
+            }
+            try FileManager.default.moveItem(at: url, to: finalizedURL)
+            url = finalizedURL
         }
         return url
     }
@@ -84,5 +93,19 @@ final class OpusCaptureFile {
             | (UInt32(bytes[2]) << 16)
             | (UInt32(bytes[3]) << 24)
         return Int(value)
+    }
+
+    private static func captureDirectory(baseDirectory: URL?) throws -> URL {
+        if let baseDirectory {
+            return baseDirectory.appendingPathComponent("TokDownCaptures", isDirectory: true)
+        }
+
+        let documents = try FileManager.default.url(
+            for: .documentDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        return documents.appendingPathComponent("TranscriptionRecovery", isDirectory: true)
     }
 }

@@ -57,8 +57,10 @@ enum Protobuf {
 
     private static func readField(_ data: Data, from offset: Data.Index) -> (Field, Data.Index)? {
         guard let (tag, valueOffset) = readVarint(data, from: offset) else { return nil }
-        let wireType = Int(tag & 0x07)
-        let fieldNumber = Int(tag >> 3)
+        guard let wireType = Int(exactly: tag & 0x07),
+              let fieldNumber = Int(exactly: tag >> 3) else {
+            return nil
+        }
 
         switch wireType {
         case 0:
@@ -186,8 +188,12 @@ final class FragmentReassembler {
         for field in fields {
             switch field.number {
             case 1: messageIndex = field.varintValue
-            case 2: fragmentSeq = Int(field.varintValue)
-            case 3: totalFragments = Int(field.varintValue)
+            case 2:
+                guard let seq = Int(exactly: field.varintValue) else { return nil }
+                fragmentSeq = seq
+            case 3:
+                guard let total = Int(exactly: field.varintValue) else { return nil }
+                totalFragments = total
             case 4: payload = field.bytesValue
             default: break
             }

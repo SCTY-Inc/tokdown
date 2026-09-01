@@ -14,7 +14,7 @@ struct TokDownApp: App {
                 .environment(appState.transcription)
                 .environment(appState.calendar)
                 .task {
-                    await appState.requestPermissions()
+                    appState.startServices()
                 }
         }
     }
@@ -36,22 +36,9 @@ final class AppState {
         settings: settings
     )
 
-    func requestPermissions() async {
+    func startServices() {
         ble.startScanning()
-
-        let speechAuthorized = await transcription.requestAuthorization()
         transcription.refreshRecognitionSupport()
-        let calendarAuthorized = await calendar.requestAccess()
-
-        var errors: [String] = []
-        if !speechAuthorized {
-            errors.append("Speech access denied")
-        }
-        if settings.recordingMode == .calendar && !calendarAuthorized {
-            errors.append("Calendar access denied")
-        }
-
-        session.lastError = errors.isEmpty ? nil : errors.joined(separator: " • ")
         session.applySettings()
         session.loadRecentTranscripts()
         session.pushQueue.drain()

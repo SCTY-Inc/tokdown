@@ -19,10 +19,14 @@ struct OpusCaptureFileTests {
         ]
 
         let capture = try OpusCaptureFile(baseDirectory: tempDirectory)
+        #expect(capture.url.lastPathComponent.hasSuffix(".opusframes.partial"))
         for frame in frames {
             try capture.append(frame: frame)
         }
+        let partialURL = capture.url
         let url = try capture.finalize()
+        #expect(url.pathExtension == "opusframes")
+        #expect(!FileManager.default.fileExists(atPath: partialURL.path))
 
         var decoded: [Data] = []
         try OpusCaptureFile.forEachFrame(at: url) { frame in

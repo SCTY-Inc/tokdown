@@ -17,7 +17,7 @@ xcrun devicectl device process launch --device <UDID> com.amadad.tokdown
 ## Architecture
 BLE RX notifications -> FragmentReassembler -> OpusFrameExtractor ->
 - Live mode: OpusStreamDecoder -> TranscriptionService (chunked SFSpeechRecognizer while recording)
-- Low Power mode: OpusCaptureFile -> stop recording -> OpusStreamDecoder -> PCMRenderFile -> SFSpeechURLRecognitionRequest
+- Low Power mode: OpusCaptureFile -> stop recording -> durable .opusframes recovery file -> OpusStreamDecoder -> PCMRenderFile -> SFSpeechURLRecognitionRequest
 -> TranscriptFormatter -> GitHubSync / PushQueue
 
 States: idle -> recording -> transcribing -> pushing
@@ -29,7 +29,7 @@ Transcription modes:
 Key files:
 - `LimitlessProtocol.swift` -- protobuf encode/decode, BLE commands (timeSync, enableDataStream, disableDataStream), FragmentReassembler, OpusFrameExtractor
 - `OpusStreamDecoder.swift` -- libopus wrapper (Opus.Decoder from swift-opus)
-- `OpusCaptureFile.swift` -- temp length-prefixed Opus frame capture for Low Power mode
+- `OpusCaptureFile.swift` -- length-prefixed Opus frame capture for Low Power mode; writes `.opusframes.partial` during capture and finalizes to durable `Documents/TranscriptionRecovery/*.opusframes` before transcription
 - `PCMRenderFile.swift` -- renders deferred PCM audio to a local `.caf` file for `SFSpeechURLRecognitionRequest`
 - `SpeechLanguageModelCache.swift` -- builds and caches custom Speech language models from contextual phrases when available
 - `PendantBLE.swift` -- CoreBluetooth manager, retrieve-known reconnect path, filtered scan/service discovery, reconnect backoff
@@ -56,8 +56,8 @@ Key files:
 
 ## Output
 Markdown transcripts pushed to a configurable GitHub repo (set in Settings) at `{path}/YYYY-MM-DD_HH-mm-ss-SSS_Title.md`.
-YAML front matter with `audio_source: "limitless_pendant"`, `source: "pendant_ambient"` or `"pendant_meeting"`.
-Same format as TokDown macOS -- transcripts are indistinguishable in the archive.
+YAML front matter follows the TokDown archive contract: `audio_source: "limitless_pendant"`, plus `source: "manual_recording"` or `"calendar_selection"`.
+Calendar-linked pendant recordings include `calendar_provider: "apple_calendar"` and the available EventKit fields.
 
 ## Dependencies
 - [alta/swift-opus](https://github.com/alta/swift-opus) v0.0.2 -- libopus SPM package (compiles C source)
@@ -66,8 +66,9 @@ Same format as TokDown macOS -- transcripts are indistinguishable in the archive
 ## Gotchas
 - Limitless Pendant uses protobuf-wrapped BLE protocol (NOT standard Omi 3-byte header)
 - Must send timeSync before enableDataStream; enableDataStream sent only when recording starts (not on connect) to preserve pendant battery
-- `lowPower` is the default transcription mode; it captures raw Opus frames to a temp `.opusframes` file, renders PCM `.caf`, then transcribes with `SFSpeechURLRecognitionRequest`
-- If deferred transcription fails or times out, preserve the original `.opusframes` file under `Documents/TranscriptionRecovery` instead of deleting the only recoverable audio
+- `lowPower` is the default transcription mode; it captures raw Opus frames to a `.opusframes.partial` file, finalizes to `Documents/TranscriptionRecovery/*.opusframes`, renders PCM `.caf`, then transcribes with `SFSpeechURLRecognitionRequest`
+- Speech permission is requested when recording starts. Calendar permission is requested when calendar mode is enabled, not on ordinary launch.
+- If deferred transcription fails or times out, keep the finalized `.opusframes` file under `Documents/TranscriptionRecovery` instead of deleting the only recoverable audio
 - `live` mode keeps `SFSpeechRecognizer` active during recording and costs noticeably more battery than `lowPower`
 - disableDataStream (realTimeMode=0) sent when recording stops; speculative — verify pendant honors it
 - Incoming audio is protobuf-fragmented; needs reassembly before Opus decode

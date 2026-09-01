@@ -519,7 +519,7 @@ struct TranscriptDetailView: View {
             repo: session.settings.transcriptRepo,
             basePath: session.settings.transcriptRepoPath
         )
-        session.markRecentTranscriptPushed(filename: filename)
+        session.markRecentTranscriptQueued(filename: filename)
         showStatus("Queued")
     }
 

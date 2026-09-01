@@ -1,7 +1,8 @@
 import Foundation
 
 /// Formats transcript data into YAML front matter + timestamped markdown body.
-/// Output format matches TokDown exactly, with pendant-specific source metadata.
+/// Output format follows the TokDown transcript contract, with pendant-specific
+/// audio source metadata.
 struct TranscriptFormatter {
 
     struct TranscriptDocument {
@@ -56,52 +57,39 @@ struct TranscriptFormatter {
         return TranscriptDocument(title: resolvedTitle, filename: filename, markdown: markdown)
     }
 
-    // MARK: - Front matter (matches TokDown format)
+    // MARK: - Front matter
 
     /// Build YAML front matter block.
-    /// Keys: title, source, audio_source, recording_started_at, recording_ended_at,
-    ///        plus calendar fields when meeting is present.
     private func makeFrontMatter(
         title: String,
         startTime: Date,
         endTime: Date,
         meeting: CalendarService.Meeting?
     ) -> String {
-        // source: "pendant_meeting" when calendar-linked, "pendant_ambient" otherwise
-        // audio_source: "limitless_pendant"
-        //
-        // ---
-        // title: "Meeting Title"
-        // source: "pendant_ambient"
-        // audio_source: "limitless_pendant"
-        // recording_started_at: "2026-04-01T10:00:00-07:00"
-        // recording_ended_at: "2026-04-01T10:30:00-07:00"
-        // calendar: "Work"
-        // event_id: "abc123"
-        // event_start: "2026-04-01T10:00:00-07:00"
-        // event_end: "2026-04-01T10:30:00-07:00"
-        // ---
-        var yamlLines: [String] = [
+        var yamlLines: [String?] = [
             "---",
-            "title: \"\(escapeYAML(title))\"",
-            "source: \"\(meeting != nil ? "pendant_meeting" : "pendant_ambient")\"",
-            "audio_source: \"limitless_pendant\"",
-            "recording_started_at: \"\(iso8601(startTime))\"",
-            "recording_ended_at: \"\(iso8601(endTime))\""
+            yamlScalar(key: "title", value: title),
+            yamlScalar(key: "source", value: meeting == nil ? "manual_recording" : "calendar_selection"),
+            yamlScalar(key: "calendar_provider", value: meeting == nil ? nil : "apple_calendar"),
+            yamlScalar(key: "audio_source", value: "limitless_pendant"),
+            yamlScalar(key: "recording_started_at", value: iso8601(startTime)),
+            yamlScalar(key: "recording_ended_at", value: iso8601(endTime))
         ]
 
         if let meeting {
-            yamlLines.append("calendar: \"\(escapeYAML(meeting.calendarTitle))\"")
-            yamlLines.append("event_id: \"\(escapeYAML(meeting.eventIdentifier))\"")
-            yamlLines.append("event_start: \"\(iso8601(meeting.startDate))\"")
-            yamlLines.append("event_end: \"\(iso8601(meeting.endDate))\"")
-            if let location = meeting.location {
-                yamlLines.append("location: \"\(escapeYAML(location))\"")
-            }
+            yamlLines.append(yamlScalar(key: "calendar", value: meeting.calendarTitle))
+            yamlLines.append(yamlScalar(key: "event_id", value: meeting.eventIdentifier))
+            yamlLines.append(yamlScalar(key: "event_start", value: iso8601(meeting.startDate)))
+            yamlLines.append(yamlScalar(key: "event_end", value: iso8601(meeting.endDate)))
+            yamlLines.append(yamlScalar(key: "location", value: meeting.location))
+            yamlLines.append(yamlScalar(key: "url", value: meeting.url?.absoluteString))
+            yamlLines.append(yamlPerson(key: "organizer", person: meeting.organizer))
+            yamlLines.append(yamlPeople(key: "attendees", people: meeting.attendees))
+            yamlLines.append(yamlBlock(key: "notes", value: meeting.notes))
         }
 
         yamlLines.append("---")
-        return yamlLines.joined(separator: "\n")
+        return yamlLines.compactMap { $0 }.joined(separator: "\n")
     }
 
     // MARK: - Body
@@ -196,5 +184,56 @@ struct TranscriptFormatter {
         value
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    private func yamlScalar(key: String, value: String?) -> String? {
+        guard let value = trimmedOrNil(value) else { return nil }
+        return "\(key): \"\(escapeYAML(value))\""
+    }
+
+    private func yamlBlock(key: String, value: String?) -> String? {
+        guard let value = trimmedOrNil(value) else { return nil }
+        let indented = value
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { "  \($0)" }
+            .joined(separator: "\n")
+        return "\(key): |\n\(indented)"
+    }
+
+    private func yamlPerson(key: String, person: CalendarService.MeetingPerson?) -> String? {
+        guard let person, !person.isEmpty else { return nil }
+
+        var lines = ["\(key):"]
+        if let name = trimmedOrNil(person.name) {
+            lines.append("  name: \"\(escapeYAML(name))\"")
+        }
+        if let email = trimmedOrNil(person.email) {
+            lines.append("  email: \"\(escapeYAML(email))\"")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func yamlPeople(key: String, people: [CalendarService.MeetingPerson]) -> String? {
+        let validPeople = people.filter { !$0.isEmpty }
+        guard !validPeople.isEmpty else { return nil }
+
+        var lines = ["\(key):"]
+        for person in validPeople {
+            if let name = trimmedOrNil(person.name), let email = trimmedOrNil(person.email) {
+                lines.append("  - name: \"\(escapeYAML(name))\"")
+                lines.append("    email: \"\(escapeYAML(email))\"")
+            } else if let name = trimmedOrNil(person.name) {
+                lines.append("  - name: \"\(escapeYAML(name))\"")
+            } else if let email = trimmedOrNil(person.email) {
+                lines.append("  - email: \"\(escapeYAML(email))\"")
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func trimmedOrNil(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

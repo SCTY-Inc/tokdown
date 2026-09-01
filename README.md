@@ -27,6 +27,7 @@ Pendant (BLE) -> Opus capture/decode -> Speech recognition -> Markdown -> GitHub
 - **Manual or calendar-driven recording** -- auto-start/stop based on calendar events
 - **Low Power or Live transcription** -- choose battery-friendly deferred transcription or live transcript preview
 - **On-device transcription** -- no cloud APIs, works offline
+- **Action-scoped permissions** -- Speech is requested when recording starts; Calendar is requested when calendar mode is enabled
 - **Speech tuning** -- dictation task hint, contextual vocabulary, and custom language model prewarm when available
 - **Background recording** -- continues when app is backgrounded
 - **Smart BLE reconnect** -- tries known-peripheral retrieval first, then filtered scan with backoff
@@ -64,7 +65,9 @@ The app defaults to `Low Power` transcription mode for better battery life on lo
 
 If you leave auto-push on, you can also choose `Push timing` in Settings to send transcripts immediately, only on Wi‑Fi, only while charging, or on Wi‑Fi/charging.
 
-If Low Power transcription fails or times out, TokDown now preserves the original captured `.opusframes` file in the app's `Documents/TranscriptionRecovery` folder instead of deleting the only recoverable audio.
+If Low Power transcription fails, times out, or the app is interrupted after capture finalizes, TokDown keeps the original captured `.opusframes` file in the app's `Documents/TranscriptionRecovery` folder instead of deleting the only recoverable audio.
+
+Transcript front matter follows the same archive contract as TokDown for macOS. Pendant recordings use `audio_source: "limitless_pendant"` with `source: "manual_recording"` or `source: "calendar_selection"` depending on whether a calendar event was attached.
 
 ## Architecture
 
@@ -73,7 +76,7 @@ If Low Power transcription fails or times out, TokDown now preserves the origina
 | `PendantBLE.swift` | CoreBluetooth manager, BLE handshake |
 | `LimitlessProtocol.swift` | Protobuf encode/decode, fragment reassembly, Opus extraction |
 | `OpusStreamDecoder.swift` | libopus wrapper |
-| `OpusCaptureFile.swift` | Temp Opus frame capture for Low Power mode |
+| `OpusCaptureFile.swift` | Durable Opus frame capture for Low Power mode and recovery |
 | `PCMRenderFile.swift` | Renders deferred PCM audio to local `.caf` files |
 | `SpeechLanguageModelCache.swift` | Builds cached custom language models from contextual phrases |
 | `TranscriptionService.swift` | Chunked live speech recognition + file-based deferred transcription |

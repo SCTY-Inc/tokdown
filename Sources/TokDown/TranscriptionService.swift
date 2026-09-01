@@ -170,6 +170,7 @@ final class TranscriptionService {
 
         let customLanguageModel = await customLanguageModelConfiguration(locale: locale)
         configureRequest(request, shouldReportPartialResults: false, customLanguageModel: customLanguageModel)
+        let timeout = await fileRecognitionTimeout(for: url)
 
         isTranscribing = true
         let signpost = PerformanceTrace.beginInterval("SpeechFileRecognition", detail: url.lastPathComponent)
@@ -185,7 +186,7 @@ final class TranscriptionService {
             }
 
             timeoutTask = Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .seconds(20))
+                try? await Task.sleep(for: timeout)
                 guard let self, !didResume else { return }
                 self.lastError = "Speech recognition timed out for prerecorded audio"
                 self.recognitionTask?.cancel()
@@ -553,6 +554,18 @@ final class TranscriptionService {
         let configuration = await languageModelCache.configuration(for: contextualStrings, locale: locale)
         preparedLanguageModelConfiguration = configuration
         return configuration
+    }
+
+    private func fileRecognitionTimeout(for url: URL) async -> Duration {
+        let asset = AVURLAsset(url: url)
+        let duration = try? await asset.load(.duration)
+        let seconds = duration.map(CMTimeGetSeconds) ?? 0
+        guard seconds.isFinite, seconds > 0 else {
+            return .seconds(300)
+        }
+
+        let timeoutSeconds = min(max(seconds * 2, 60), 600)
+        return .seconds(Int64(timeoutSeconds.rounded(.up)))
     }
 
     private func mergedTranscriptLines(_ existing: [TranscriptLine], with incoming: [TranscriptLine]) -> [TranscriptLine] {

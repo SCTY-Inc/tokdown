@@ -30,7 +30,11 @@ struct TranscriptFormatterTests {
         title: String = "Standup",
         calendarTitle: String = "Work",
         eventID: String = "abc-123",
-        location: String? = nil
+        location: String? = nil,
+        notes: String? = nil,
+        url: URL? = nil,
+        organizer: CalendarService.MeetingPerson? = nil,
+        attendees: [CalendarService.MeetingPerson] = []
     ) -> CalendarService.Meeting {
         CalendarService.Meeting(
             eventIdentifier: eventID,
@@ -39,14 +43,18 @@ struct TranscriptFormatterTests {
             endDate: fixedEnd,
             calendarTitle: calendarTitle,
             location: location,
-            participantNames: []
+            participantNames: [],
+            notes: notes,
+            url: url,
+            organizer: organizer,
+            attendees: attendees
         )
     }
 
     // MARK: - YAML front matter
 
-    @Test("Manual recording (no meeting) emits pendant_ambient source")
-    func manualRecordingSourceIsAmbient() throws {
+    @Test("Manual recording (no meeting) emits manual source and pendant audio source")
+    func manualRecordingSourceIsManual() throws {
         let doc = Self.makeFormatter().makeDocument(
             title: "Morning Notes",
             startTime: Self.fixedStart,
@@ -56,18 +64,25 @@ struct TranscriptFormatterTests {
             lines: []
         )
 
-        #expect(doc.markdown.contains(#"source: "pendant_ambient""#))
-        #expect(!doc.markdown.contains(#"source: "pendant_meeting""#))
+        #expect(doc.markdown.contains(#"source: "manual_recording""#))
+        #expect(!doc.markdown.contains("calendar_provider:"))
         #expect(doc.markdown.contains(#"audio_source: "limitless_pendant""#))
     }
 
-    @Test("Calendar-backed recording emits pendant_meeting source and calendar fields")
+    @Test("Calendar-backed recording emits shared calendar source and calendar fields")
     func calendarBackedRecordingEmitsMeetingFields() throws {
         let meeting = Self.makeMeeting(
             title: "Standup",
             calendarTitle: "Work",
             eventID: "evt-42",
-            location: "Room 3"
+            location: "Room 3",
+            notes: "Agenda line 1\nAgenda line 2",
+            url: URL(string: "https://zoom.us/j/123"),
+            organizer: CalendarService.MeetingPerson(name: "Jane Doe", email: "jane@example.com"),
+            attendees: [
+                CalendarService.MeetingPerson(name: "Jane Doe", email: "jane@example.com"),
+                CalendarService.MeetingPerson(name: "Alex Smith", email: "alex@example.com")
+            ]
         )
         let doc = Self.makeFormatter().makeDocument(
             title: "Standup",
@@ -78,11 +93,17 @@ struct TranscriptFormatterTests {
             lines: []
         )
 
-        #expect(doc.markdown.contains(#"source: "pendant_meeting""#))
+        #expect(doc.markdown.contains(#"source: "calendar_selection""#))
+        #expect(doc.markdown.contains(#"calendar_provider: "apple_calendar""#))
         #expect(doc.markdown.contains(#"audio_source: "limitless_pendant""#))
         #expect(doc.markdown.contains(#"calendar: "Work""#))
         #expect(doc.markdown.contains(#"event_id: "evt-42""#))
         #expect(doc.markdown.contains(#"location: "Room 3""#))
+        #expect(doc.markdown.contains(#"url: "https://zoom.us/j/123""#))
+        #expect(doc.markdown.contains("organizer:"))
+        #expect(doc.markdown.contains(#"email: "jane@example.com""#))
+        #expect(doc.markdown.contains("attendees:"))
+        #expect(doc.markdown.contains("notes: |"))
         #expect(doc.markdown.contains("event_start:"))
         #expect(doc.markdown.contains("event_end:"))
     }

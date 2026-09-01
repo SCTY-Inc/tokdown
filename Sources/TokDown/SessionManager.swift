@@ -138,6 +138,7 @@ final class SessionManager {
     private var currentMeeting: CalendarService.Meeting?
     private var activeTranscriptionMode: TranscriptionMode?
     private var deferredCapture: OpusCaptureFile?
+    private var isHandlingRecordingAction = false
 
     struct RecentTranscript: Identifiable {
         enum SyncStatus: Sendable {
@@ -188,14 +189,41 @@ final class SessionManager {
         case .calendar:
             if calendar.isAuthorized {
                 enableCalendarMode()
+            } else {
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    let granted = await calendar.requestAccess()
+                    if granted {
+                        enableCalendarMode()
+                    } else {
+                        recordingMode = .manual
+                        settings.recordingMode = .manual
+                        lastError = "Calendar access denied"
+                    }
+                }
             }
         }
     }
 
     func startRecording(meeting: CalendarService.Meeting? = nil) {
-        guard state == .idle else { return }
+        guard state == .idle, !isHandlingRecordingAction else { return }
+        isHandlingRecordingAction = true
 
+        Task { @MainActor [weak self] in
+            await self?.beginRecording(meeting: meeting)
+        }
+    }
+
+    private func beginRecording(meeting: CalendarService.Meeting?) async {
+        defer { isHandlingRecordingAction = false }
+        guard state == .idle else { return }
         lastError = nil
+
+        guard await transcription.requestAuthorization() else {
+            lastError = "Speech recognition permission denied"
+            return
+        }
+
         currentMeeting = meeting
         currentTitle = meeting?.title ?? ""
         decodedFrameCount = 0
@@ -610,6 +638,11 @@ final class SessionManager {
         recentTranscripts[index].syncStatus = .pushed
     }
 
+    func markRecentTranscriptQueued(filename: String) {
+        guard let index = recentTranscripts.firstIndex(where: { $0.filename == filename }) else { return }
+        recentTranscripts[index].syncStatus = .queued
+    }
+
     private func addRecentTranscript(
         title: String,
         filename: String,
@@ -724,6 +757,12 @@ final class SessionManager {
             let recoveryDirectory = documentsURL.appendingPathComponent("TranscriptionRecovery", isDirectory: true)
             try FileManager.default.createDirectory(at: recoveryDirectory, withIntermediateDirectories: true)
 
+            if url.deletingLastPathComponent().standardizedFileURL == recoveryDirectory.standardizedFileURL {
+                DebugLog.write("deferred capture already in recovery file=\(url.lastPathComponent) reason=\(reason)")
+                appendRecoveryMessageIfNeeded()
+                return
+            }
+
             let originalName = url.deletingPathExtension().lastPathComponent
             let ext = url.pathExtension
             var destinationURL = recoveryDirectory.appendingPathComponent(url.lastPathComponent)
@@ -740,14 +779,18 @@ final class SessionManager {
             try FileManager.default.moveItem(at: url, to: destinationURL)
             DebugLog.write("preserved deferred capture file=\(destinationURL.lastPathComponent) reason=\(reason)")
 
-            let preservedMessage = "Original audio preserved locally in TranscriptionRecovery."
-            if let lastError, !lastError.contains(preservedMessage) {
-                self.lastError = "\(lastError) \(preservedMessage)"
-            } else if self.lastError == nil {
-                self.lastError = preservedMessage
-            }
+            appendRecoveryMessageIfNeeded()
         } catch {
             DebugLog.write("preserve deferred capture failed reason=\(reason) error=\(error.localizedDescription)")
+        }
+    }
+
+    private func appendRecoveryMessageIfNeeded() {
+        let preservedMessage = "Original audio preserved locally in TranscriptionRecovery."
+        if let lastError, !lastError.contains(preservedMessage) {
+            self.lastError = "\(lastError) \(preservedMessage)"
+        } else if self.lastError == nil {
+            self.lastError = preservedMessage
         }
     }
 

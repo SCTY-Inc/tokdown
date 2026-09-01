@@ -7,6 +7,42 @@ import Observation
 @MainActor @Observable
 final class CalendarService {
 
+    struct MeetingPerson: Hashable, Sendable {
+        let name: String?
+        let email: String?
+
+        var isEmpty: Bool {
+            let normalizedName = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let normalizedEmail = email?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return normalizedName.isEmpty && normalizedEmail.isEmpty
+        }
+
+        init(name: String? = nil, email: String? = nil) {
+            self.name = name?.nilIfBlank
+            self.email = email?.nilIfBlank
+        }
+
+        init(participant: EKParticipant) {
+            self.init(
+                name: participant.name,
+                email: Self.emailAddress(from: participant.url)
+            )
+        }
+
+        private static func emailAddress(from url: URL?) -> String? {
+            guard let url else { return nil }
+
+            if url.scheme?.lowercased() == "mailto" {
+                let prefix = "mailto:"
+                let absoluteString = url.absoluteString
+                guard absoluteString.lowercased().hasPrefix(prefix) else { return nil }
+                return String(absoluteString.dropFirst(prefix.count)).removingPercentEncoding?.nilIfBlank
+            }
+
+            return nil
+        }
+    }
+
     struct Meeting: Identifiable, Sendable {
         let eventIdentifier: String
         var id: String { eventIdentifier }
@@ -16,6 +52,42 @@ final class CalendarService {
         let calendarTitle: String
         let location: String?
         let participantNames: [String]
+        let notes: String?
+        let url: URL?
+        let organizer: MeetingPerson?
+        let attendees: [MeetingPerson]
+
+        init(
+            eventIdentifier: String,
+            title: String,
+            startDate: Date,
+            endDate: Date,
+            calendarTitle: String,
+            location: String? = nil,
+            participantNames: [String] = [],
+            notes: String? = nil,
+            url: URL? = nil,
+            organizer: MeetingPerson? = nil,
+            attendees: [MeetingPerson] = []
+        ) {
+            self.eventIdentifier = eventIdentifier
+            self.title = title.nilIfBlank ?? "Untitled"
+            self.startDate = startDate
+            self.endDate = endDate
+            self.calendarTitle = calendarTitle
+            self.location = location?.nilIfBlank
+            self.notes = notes?.nilIfBlank
+            self.url = url
+            self.organizer = organizer?.isEmpty == true ? nil : organizer
+            self.attendees = attendees.filter { !$0.isEmpty }
+
+            let names = participantNames.isEmpty
+                ? self.attendees.compactMap(\.name)
+                : participantNames
+            self.participantNames = names
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        }
     }
 
     var upcomingMeetings: [Meeting] = []
@@ -70,7 +142,11 @@ final class CalendarService {
                     location: event.location,
                     participantNames: event.attendees?
                         .compactMap { $0.name?.trimmingCharacters(in: .whitespacesAndNewlines) }
-                        .filter { !$0.isEmpty } ?? []
+                        .filter { !$0.isEmpty } ?? [],
+                    notes: event.notes,
+                    url: event.url,
+                    organizer: event.organizer.map(MeetingPerson.init(participant:)),
+                    attendees: (event.attendees ?? []).map(MeetingPerson.init(participant:))
                 )
             }
     }
@@ -100,5 +176,12 @@ final class CalendarService {
                 self?.refreshMeetings()
             }
         }
+    }
+}
+
+private extension String {
+    var nilIfBlank: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
