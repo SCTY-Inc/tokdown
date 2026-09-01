@@ -101,10 +101,21 @@ final class SystemAudioService: NSObject {
 
         // 5. Install the IO proc. The block runs on a Core Audio real-time thread;
         //    TapWriter serializes file access and level metering internally.
-        var newProcID: AudioDeviceIOProcID?
-        let procStatus = AudioDeviceCreateIOProcIDWithBlock(&newProcID, newAggregateID, nil) { _, inInputData, _, _, _ in
+        //    The block MUST be @Sendable: it is defined inside this @MainActor method,
+        //    so without it Swift 6 infers MainActor isolation and emits an executor
+        //    assertion at the block's entry. Core Audio calls the block on its own RT
+        //    thread, the assertion fails, and the app traps (SIGTRAP) on first buffer.
+        let ingest: @convention(block) @Sendable (
+            UnsafePointer<AudioTimeStamp>,
+            UnsafePointer<AudioBufferList>,
+            UnsafePointer<AudioTimeStamp>,
+            UnsafeMutablePointer<AudioBufferList>,
+            UnsafePointer<AudioTimeStamp>
+        ) -> Void = { [tapWriter] _, inInputData, _, _, _ in
             tapWriter.ingest(inInputData)
         }
+        var newProcID: AudioDeviceIOProcID?
+        let procStatus = AudioDeviceCreateIOProcIDWithBlock(&newProcID, newAggregateID, nil, ingest)
         guard procStatus == noErr, let procID = newProcID else {
             AudioHardwareDestroyAggregateDevice(newAggregateID)
             AudioHardwareDestroyProcessTap(newTapID)
