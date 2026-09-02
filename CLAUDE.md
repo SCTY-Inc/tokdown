@@ -30,3 +30,11 @@ bash scripts/build-app.sh debug && open TokDown.app
 - `SystemAudioService` meters per-buffer peak on the IO-proc thread; `MenuBarCoordinator` polls `hasCapturedAudibleSignal()` and shows a live menu warning if a system-audio capture stays silent past an 8s grace. Optional mic fallback (setting) records the mic in parallel and is transcribed if the system transcript is empty.
 - `SpeechAnalyzer` keep-alive: `_ = analyzer` must appear **after** the `for try await` loop, not before it. ARC determines lifetime by last-use; placing it before the loop lets the compiler drop the analyzer before the pipeline drains.
 - `StorageService` records raw audio under a TokDown-owned temporary session folder, then writes only the final `.md` transcript to the selected folder. `cleanupTemporaryAudioFiles()` is called from `loadMeetings()` and only deletes `.m4a` files from TokDown temporary storage.
+
+## Repo layout (2026-09-02)
+
+One repo, two apps. The macOS menu bar app is the root Swift package (`swift build`).
+The iOS app lives in `Apps/iOS/` (`cd Apps/iOS && xcodegen generate`, then build the
+project); it arrived by subtree merge from tokdown-mobile with full history.
+Next step: extract `Sources/TokDownKit` (formatter, transcription protocol, calendar and
+settings cores) so both apps share it. Nothing is shared yet.
