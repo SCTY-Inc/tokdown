@@ -1,0 +1,368 @@
+import Foundation
+import Testing
+@testable import TokDown
+
+/// Unit tests for `TranscriptFormatter`.
+///
+/// These tests are pinned to a fixed TimeZone (UTC) so filename date parts
+/// and ISO-8601 output are deterministic across machines and CI.
+@Suite("TranscriptFormatter")
+struct TranscriptFormatterTests {
+
+    // MARK: - Test helpers
+
+    private static let utc = TimeZone(identifier: "UTC")!
+
+    /// 2026-04-11T10:30:00Z
+    private static let fixedStart = Date(timeIntervalSince1970: 1_775_903_400)
+    /// 2026-04-11T11:00:00Z — 30 minutes after start
+    private static let fixedEnd   = Date(timeIntervalSince1970: 1_775_905_200)
+
+    private static func makeFormatter() -> TranscriptFormatter {
+        TranscriptFormatter(timeZone: utc)
+    }
+
+    private static func line(_ text: String, at timestamp: TimeInterval) -> TranscriptionService.TranscriptLine {
+        TranscriptionService.TranscriptLine(timestamp: timestamp, text: text)
+    }
+
+    private static func makeMeeting(
+        title: String = "Standup",
+        calendarTitle: String = "Work",
+        eventID: String = "abc-123",
+        location: String? = nil,
+        notes: String? = nil,
+        url: URL? = nil,
+        organizer: CalendarService.MeetingPerson? = nil,
+        attendees: [CalendarService.MeetingPerson] = []
+    ) -> CalendarService.Meeting {
+        CalendarService.Meeting(
+            eventIdentifier: eventID,
+            title: title,
+            startDate: fixedStart,
+            endDate: fixedEnd,
+            calendarTitle: calendarTitle,
+            location: location,
+            participantNames: [],
+            notes: notes,
+            url: url,
+            organizer: organizer,
+            attendees: attendees
+        )
+    }
+
+    // MARK: - YAML front matter
+
+    @Test("Manual recording (no meeting) emits manual source and pendant audio source")
+    func manualRecordingSourceIsManual() throws {
+        let doc = Self.makeFormatter().makeDocument(
+            title: "Morning Notes",
+            startTime: Self.fixedStart,
+            endTime: Self.fixedEnd,
+            meeting: nil,
+            fullText: "Hello world.",
+            lines: []
+        )
+
+        #expect(doc.markdown.contains(#"source: "manual_recording""#))
+        #expect(!doc.markdown.contains("calendar_provider:"))
+        #expect(doc.markdown.contains(#"audio_source: "limitless_pendant""#))
+    }
+
+    @Test("Calendar-backed recording emits shared calendar source and calendar fields")
+    func calendarBackedRecordingEmitsMeetingFields() throws {
+        let meeting = Self.makeMeeting(
+            title: "Standup",
+            calendarTitle: "Work",
+            eventID: "evt-42",
+            location: "Room 3",
+            notes: "Agenda line 1\nAgenda line 2",
+            url: URL(string: "https://zoom.us/j/123"),
+            organizer: CalendarService.MeetingPerson(name: "Jane Doe", email: "jane@example.com"),
+            attendees: [
+                CalendarService.MeetingPerson(name: "Jane Doe", email: "jane@example.com"),
+                CalendarService.MeetingPerson(name: "Alex Smith", email: "alex@example.com")
+            ]
+        )
+        let doc = Self.makeFormatter().makeDocument(
+            title: "Standup",
+            startTime: Self.fixedStart,
+            endTime: Self.fixedEnd,
+            meeting: meeting,
+            fullText: "Planning sprint.",
+            lines: []
+        )
+
+        #expect(doc.markdown.contains(#"source: "calendar_selection""#))
+        #expect(doc.markdown.contains(#"calendar_provider: "apple_calendar""#))
+        #expect(doc.markdown.contains(#"audio_source: "limitless_pendant""#))
+        #expect(doc.markdown.contains(#"calendar: "Work""#))
+        #expect(doc.markdown.contains(#"event_id: "evt-42""#))
+        #expect(doc.markdown.contains(#"location: "Room 3""#))
+        #expect(doc.markdown.contains(#"url: "https://zoom.us/j/123""#))
+        #expect(doc.markdown.contains("organizer:"))
+        #expect(doc.markdown.contains(#"email: "jane@example.com""#))
+        #expect(doc.markdown.contains("attendees:"))
+        #expect(doc.markdown.contains("notes: |"))
+        #expect(doc.markdown.contains("event_start:"))
+        #expect(doc.markdown.contains("event_end:"))
+    }
+
+    @Test("Meeting without location omits the location YAML key")
+    func meetingWithoutLocationOmitsKey() throws {
+        let meeting = Self.makeMeeting(location: nil)
+        let doc = Self.makeFormatter().makeDocument(
+            title: "Standup",
+            startTime: Self.fixedStart,
+            endTime: Self.fixedEnd,
+            meeting: meeting,
+            fullText: "",
+            lines: []
+        )
+
+        #expect(!doc.markdown.contains("location:"))
+    }
+
+    @Test("Front matter starts with --- and contains recording timestamps")
+    func frontMatterDelimitedAndHasTimestamps() throws {
+        let doc = Self.makeFormatter().makeDocument(
+            title: "Test",
+            startTime: Self.fixedStart,
+            endTime: Self.fixedEnd,
+            meeting: nil,
+            fullText: "Body",
+            lines: []
+        )
+
+        #expect(doc.markdown.hasPrefix("---\n"))
+        #expect(doc.markdown.contains("recording_started_at: \"2026-04-11T10:30:00Z\""))
+        #expect(doc.markdown.contains("recording_ended_at: \"2026-04-11T11:00:00Z\""))
+    }
+
+    // MARK: - Timestamp chunking (5-second windows)
+
+    @Test("Lines within 5-second window collapse into one timestamped chunk")
+    func linesWithinWindowCollapse() throws {
+        let lines = [
+            Self.line("Hello", at: 0),
+            Self.line("world", at: 2),
+            Self.line("again", at: 4)
+        ]
+        let doc = Self.makeFormatter().makeDocument(
+            title: "Test",
+            startTime: Self.fixedStart,
+            endTime: Self.fixedEnd,
+            meeting: nil,
+            fullText: "Hello world again",
+            lines: lines
+        )
+
+        #expect(doc.markdown.contains("[00:00] Hello world again"))
+    }
+
+    @Test("Lines spanning >5-second gap split into separate chunks")
+    func linesAcrossGapSplit() throws {
+        let lines = [
+            Self.line("First", at: 0),
+            Self.line("Second", at: 10),
+            Self.line("Third", at: 20)
+        ]
+        let doc = Self.makeFormatter().makeDocument(
+            title: "Test",
+            startTime: Self.fixedStart,
+            endTime: Self.fixedEnd,
+            meeting: nil,
+            fullText: "",
+            lines: lines
+        )
+
+        #expect(doc.markdown.contains("[00:00] First"))
+        #expect(doc.markdown.contains("[00:10] Second"))
+        #expect(doc.markdown.contains("[00:20] Third"))
+    }
+
+    @Test("Timestamps past one hour use h:mm:ss format")
+    func longTimestampsUseHourFormat() throws {
+        let lines = [Self.line("Deep work", at: 3725)] // 1h 02m 05s
+        let doc = Self.makeFormatter().makeDocument(
+            title: "Long",
+            startTime: Self.fixedStart,
+            endTime: Self.fixedEnd,
+            meeting: nil,
+            fullText: "",
+            lines: lines
+        )
+
+        #expect(doc.markdown.contains("[1:02:05] Deep work"))
+    }
+
+    // MARK: - Title handling and filename
+
+    @Test("Empty title falls back to 'Pendant Recording'")
+    func emptyTitleFallsBack() throws {
+        let doc = Self.makeFormatter().makeDocument(
+            title: "",
+            startTime: Self.fixedStart,
+            endTime: Self.fixedEnd,
+            meeting: nil,
+            fullText: "Some audio",
+            lines: []
+        )
+
+        #expect(doc.title == "Pendant Recording")
+        #expect(doc.markdown.contains("# Pendant Recording"))
+        #expect(doc.filename.hasSuffix("_Pendant-Recording.md"))
+    }
+
+    @Test("Recordings started in the same minute still get distinct filenames")
+    func filenamesDisambiguateWithinTheSameMinute() throws {
+        let formatter = Self.makeFormatter()
+        let first = formatter.makeDocument(
+            title: "Quick Note",
+            startTime: Self.fixedStart,
+            endTime: Self.fixedEnd,
+            meeting: nil,
+            fullText: "",
+            lines: []
+        )
+        let second = formatter.makeDocument(
+            title: "Quick Note",
+            startTime: Self.fixedStart.addingTimeInterval(0.123),
+            endTime: Self.fixedEnd.addingTimeInterval(0.123),
+            meeting: nil,
+            fullText: "",
+            lines: []
+        )
+
+        #expect(first.filename != second.filename)
+    }
+
+    @Test("Filename uses a sub-minute timestamp prefix in the formatter's time zone")
+    func filenameHasDatePrefix() throws {
+        let doc = Self.makeFormatter().makeDocument(
+            title: "Quick Note",
+            startTime: Self.fixedStart,
+            endTime: Self.fixedEnd,
+            meeting: nil,
+            fullText: "",
+            lines: []
+        )
+
+        #expect(doc.filename == "2026-04-11_10-30-00-000_Quick-Note.md")
+    }
+
+    @Test("Very long title truncates to 60 characters in filename only")
+    func longTitleTruncatesFilename() throws {
+        let longTitle = String(repeating: "A", count: 120)
+        let doc = Self.makeFormatter().makeDocument(
+            title: longTitle,
+            startTime: Self.fixedStart,
+            endTime: Self.fixedEnd,
+            meeting: nil,
+            fullText: "",
+            lines: []
+        )
+
+        // Filename portion between last "_" and ".md"
+        let namePart = doc.filename
+            .replacingOccurrences(of: "2026-04-11_10-30-00-000_", with: "")
+            .replacingOccurrences(of: ".md", with: "")
+        #expect(namePart.count == 60)
+        // Full title still present in body heading (no truncation there)
+        #expect(doc.markdown.contains("# \(longTitle)"))
+    }
+
+    @Test("Non-ASCII characters stripped from filename, preserved in body")
+    func nonASCIIHandling() throws {
+        let doc = Self.makeFormatter().makeDocument(
+            title: "Café résumé 日本語",
+            startTime: Self.fixedStart,
+            endTime: Self.fixedEnd,
+            meeting: nil,
+            fullText: "",
+            lines: []
+        )
+
+        // Filename regex `[^a-zA-Z0-9 ]` strips non-ASCII letters.
+        #expect(!doc.filename.contains("é"))
+        #expect(!doc.filename.contains("日"))
+        // But the body heading and YAML title keep the original characters.
+        #expect(doc.markdown.contains("# Café résumé 日本語"))
+        #expect(doc.markdown.contains("title: \"Café résumé 日本語\""))
+    }
+
+    // MARK: - Body edge cases
+
+    @Test("Empty transcript with no lines emits '(No transcript)' placeholder")
+    func emptyTranscriptPlaceholder() throws {
+        let doc = Self.makeFormatter().makeDocument(
+            title: "Empty",
+            startTime: Self.fixedStart,
+            endTime: Self.fixedEnd,
+            meeting: nil,
+            fullText: "",
+            lines: []
+        )
+
+        #expect(doc.markdown.contains("(No transcript)"))
+    }
+
+    @Test("fullText is used verbatim when no timestamped lines are supplied")
+    func fullTextFallback() throws {
+        let doc = Self.makeFormatter().makeDocument(
+            title: "Plain",
+            startTime: Self.fixedStart,
+            endTime: Self.fixedEnd,
+            meeting: nil,
+            fullText: "   Just some free-form text.\n",
+            lines: []
+        )
+
+        #expect(doc.markdown.contains("Just some free-form text."))
+        #expect(!doc.markdown.contains("(No transcript)"))
+    }
+
+    @Test("Whitespace-only timestamped lines fall back to fullText instead of emitting an empty [00:00] row")
+    func whitespaceOnlyLinesFallBackToFullText() throws {
+        let doc = Self.makeFormatter().makeDocument(
+            title: "Plain",
+            startTime: Self.fixedStart,
+            endTime: Self.fixedEnd,
+            meeting: nil,
+            fullText: "Recovered transcript",
+            lines: [Self.line("   ", at: 0)]
+        )
+
+        #expect(doc.markdown.contains("Recovered transcript"))
+        #expect(!doc.markdown.contains("[00:00]"))
+    }
+
+    @Test("YAML double quotes in title are escaped")
+    func yamlEscapesQuotes() throws {
+        let doc = Self.makeFormatter().makeDocument(
+            title: #"She said "hello""#,
+            startTime: Self.fixedStart,
+            endTime: Self.fixedEnd,
+            meeting: nil,
+            fullText: "",
+            lines: []
+        )
+
+        #expect(doc.markdown.contains(#"title: "She said \"hello\"""#))
+    }
+
+    @Test("Front matter parser round-trips escaped quotes")
+    func frontMatterParserRoundTripsEscapedQuotes() throws {
+        let doc = Self.makeFormatter().makeDocument(
+            title: #"She said "hello""#,
+            startTime: Self.fixedStart,
+            endTime: Self.fixedEnd,
+            meeting: nil,
+            fullText: "",
+            lines: []
+        )
+
+        #expect(TranscriptFrontMatter.value(for: "title", in: doc.markdown) == #"She said "hello""#)
+        #expect(TranscriptFrontMatter.value(for: "recording_started_at", in: doc.markdown) == "2026-04-11T10:30:00Z")
+    }
+}
