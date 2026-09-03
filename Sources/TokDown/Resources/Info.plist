@@ -22,12 +22,12 @@
     <string>TokDown uses the microphone to capture interviews and meetings.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>TokDown uses speech recognition to transcribe recordings into local markdown transcripts.</string>
-<key>NSCalendarsUsageDescription</key>
+    <key>NSCalendarsUsageDescription</key>
     <string>TokDown needs calendar access to show upcoming meetings as recording targets.</string>
     <key>NSCalendarsFullAccessUsageDescription</key>
     <string>TokDown needs full calendar access to read upcoming meetings.</string>
-    <key>NSScreenCaptureUsageDescription</key>
-    <string>TokDown uses screen capture to record system audio from meetings and other apps.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>TokDown records the people you hear during meetings so it can create a complete local transcript.</string>
     <key>LSUIElement</key>
     <true/>
 </dict>

@@ -14,15 +14,15 @@ enum AudioSource: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .microphone: "Microphone"
-        case .systemAudio: "System Audio"
+        case .microphone: "Microphone Only"
+        case .systemAudio: "Meeting Audio"
         }
     }
 
     var metadataValue: String {
         switch self {
         case .microphone: "microphone"
-        case .systemAudio: "system_audio"
+        case .systemAudio: "system_audio_and_microphone"
         }
     }
 }
@@ -30,27 +30,20 @@ enum AudioSource: String, Codable, CaseIterable, Identifiable {
 struct AppSettings: Codable, Sendable {
     var saveFolderPath: String
     var audioSource: AudioSource
-    /// When recording system audio, also capture the microphone in parallel and fall
-    /// back to it if the system-audio transcript comes back empty (e.g. a route the tap
-    /// can't reach). Resilience against silent system captures.
-    var systemAudioMicFallback: Bool
 
-    init(saveFolderPath: String, audioSource: AudioSource = .systemAudio, systemAudioMicFallback: Bool = false) {
+    init(saveFolderPath: String, audioSource: AudioSource = .systemAudio) {
         self.saveFolderPath = saveFolderPath
         self.audioSource = audioSource
-        self.systemAudioMicFallback = systemAudioMicFallback
     }
 
     private enum CodingKeys: String, CodingKey {
-        case saveFolderPath, audioSource, systemAudioMicFallback
+        case saveFolderPath, audioSource
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         saveFolderPath = try container.decode(String.self, forKey: .saveFolderPath)
         audioSource = try container.decodeIfPresent(AudioSource.self, forKey: .audioSource) ?? .systemAudio
-        // Backward-compatible: older persisted settings (V2) lack this key.
-        systemAudioMicFallback = try container.decodeIfPresent(Bool.self, forKey: .systemAudioMicFallback) ?? false
     }
 }
 

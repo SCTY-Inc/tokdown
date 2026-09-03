@@ -168,6 +168,9 @@ final class SystemAudioService: NSObject {
         let frames = snapshot?.frames ?? 0
         Self.log.info("System audio capture stopped: \(frames) frames written, audible=\(snapshot?.heardAudio ?? false)")
 
+        if let writeError = snapshot?.writeError {
+            throw SystemAudioError.writeFailed(writeError)
+        }
         guard frames > 0 else {
             if let url { Self.removePartialCaptureFile(at: url) }
             throw SystemAudioError.noAudioCaptured
@@ -253,6 +256,7 @@ private final class TapWriter: @unchecked Sendable {
     private let lock = NSLock()
     private var heardAudio = false
     private var frames: Int64 = 0
+    private var writeError: Error?
 
     init(file: AVAudioFile) {
         self.file = file
@@ -277,20 +281,26 @@ private final class TapWriter: @unchecked Sendable {
         }
 
         lock.lock()
-        try? file.write(from: pcm)
-        frames += Int64(pcm.frameLength)
+        if writeError == nil {
+            do {
+                try file.write(from: pcm)
+                frames += Int64(pcm.frameLength)
+            } catch {
+                writeError = error
+            }
+        }
         if peak > Self.silenceThreshold { heardAudio = true }
         lock.unlock()
     }
 
-    func snapshot() -> (heardAudio: Bool, frames: Int64) {
+    func snapshot() -> (heardAudio: Bool, frames: Int64, writeError: Error?) {
         lock.lock()
         defer { lock.unlock() }
-        return (heardAudio, frames)
+        return (heardAudio, frames, writeError)
     }
 
     /// Returns the final snapshot; the file flushes when it deinits after this call.
-    func finish() -> (heardAudio: Bool, frames: Int64) {
+    func finish() -> (heardAudio: Bool, frames: Int64, writeError: Error?) {
         snapshot()
     }
 }

@@ -95,25 +95,17 @@ struct SettingsWindowView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 8) {
-                Label("Audio Input", systemImage: "waveform")
+                Label("Audio Capture", systemImage: "waveform")
                     .font(.headline)
 
-                Picker("Audio Input", selection: binding(for: \.audioSource)) {
+                Picker("Audio Capture", selection: binding(for: \.audioSource)) {
                     ForEach(AudioSource.allCases) { source in
                         Text(source.title).tag(source)
                     }
                 }
                 .pickerStyle(.segmented)
 
-                Text("Choose whether TokDown records system audio or microphone input by default.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Toggle("Capture microphone as fallback for system audio", isOn: binding(for: \.systemAudioMicFallback))
-                    .font(.callout)
-
-                Text("If a system-audio recording comes back empty (e.g. lid closed, or audio on another device), TokDown falls back to the microphone instead of losing the session.")
+                Text("Meeting Audio records both the people you hear through your Mac and your microphone. Microphone Only is for dictation or in-person conversations.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

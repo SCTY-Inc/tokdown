@@ -128,8 +128,7 @@ final class MenuBarCoordinatorTests: XCTestCase {
         XCTAssertNil(
             MenuBarCoordinator.silenceWarningMessage(
                 elapsedSeconds: MenuBarCoordinator.silenceGraceSeconds - 1,
-                hasAudibleSignal: false,
-                micFallbackEnabled: false
+                hasAudibleSignal: false
             )
         )
     }
@@ -138,31 +137,20 @@ final class MenuBarCoordinatorTests: XCTestCase {
         XCTAssertNil(
             MenuBarCoordinator.silenceWarningMessage(
                 elapsedSeconds: 60,
-                hasAudibleSignal: true,
-                micFallbackEnabled: false
+                hasAudibleSignal: true
             )
         )
     }
 
-    func testSilenceWarningSuggestsMicrophoneWhenNoFallback() {
+    func testSilenceWarningConfirmsMicrophoneIsStillRecording() {
         let message = MenuBarCoordinator.silenceWarningMessage(
             elapsedSeconds: MenuBarCoordinator.silenceGraceSeconds,
-            hasAudibleSignal: false,
-            micFallbackEnabled: false
+            hasAudibleSignal: false
         )
         XCTAssertEqual(
             message,
-            "No system audio detected — check output routing in System Settings ▸ Sound, or record Microphone instead."
+            "No system audio yet — your microphone is still being recorded. Check output routing in System Settings ▸ Sound."
         )
-    }
-
-    func testSilenceWarningMentionsFallbackWhenEnabled() {
-        let message = MenuBarCoordinator.silenceWarningMessage(
-            elapsedSeconds: MenuBarCoordinator.silenceGraceSeconds,
-            hasAudibleSignal: false,
-            micFallbackEnabled: true
-        )
-        XCTAssertEqual(message?.contains("fallback"), true)
     }
 
     // MARK: - Audio retention

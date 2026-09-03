@@ -1,6 +1,6 @@
 # CLAUDE.md — TokDown
 
-macOS menu bar app: system audio → transcript markdown. ~1.6k app LOC, focused XCTest coverage, no deps.
+TokDown repository: macOS menu bar meeting recorder at the root plus the Limitless Pendant iOS app under `Apps/iOS/`. The macOS app is ~2.1k LOC with focused XCTest and Swift Testing coverage and no dependencies.
 
 ## Build & Run
 ```bash
@@ -27,7 +27,7 @@ bash scripts/build-app.sh debug && open TokDown.app
 - For non-observed properties accessed in `deinit` of `@Observable` classes, prefer `@ObservationIgnored` plus `isolated deinit` over `nonisolated(unsafe)`.
 - `TranscriptionService.transcribe()` uses a duration-scaled timeout (`max(300, duration×2 + 60)`; 1800s when duration is unreadable) via `withThrowingTaskGroup`; throws `TranscriptionError.timeout` if the pipeline stalls. The old fixed 300s cap false-failed long recordings.
 - `SettingsStore.init(defaults:)` accepts a `UserDefaults` suite for test injection; production code uses `.standard` by default.
-- `SystemAudioService` meters per-buffer peak on the IO-proc thread; `MenuBarCoordinator` polls `hasCapturedAudibleSignal()` and shows a live menu warning if a system-audio capture stays silent past an 8s grace. Optional mic fallback (setting) records the mic in parallel and is transcribed if the system transcript is empty.
+- Meeting Audio always captures system output and microphone into separate temporary tracks. `AudioMixingService` uses AVFoundation to combine them locally into one `.m4a` before SpeechTranscriber runs, then the component tracks and successful transcription input are permanently deleted. This captures both sides with speakers or headphones while preserving the Core Audio tap's lid-closed behavior. If system capture fails, the microphone track is transcribed with an explicit incomplete-capture warning.
 - `SpeechAnalyzer` keep-alive: `_ = analyzer` must appear **after** the `for try await` loop, not before it. ARC determines lifetime by last-use; placing it before the loop lets the compiler drop the analyzer before the pipeline drains.
 - `StorageService` records raw audio under a TokDown-owned temporary session folder, then writes only the final `.md` transcript to the selected folder. `cleanupTemporaryAudioFiles()` is called from `loadMeetings()` and only deletes `.m4a` files from TokDown temporary storage.
 

@@ -41,7 +41,7 @@ final class TranscriptFormatterTests: XCTestCase {
 title: \"Weekly Product Sync\"
 source: \"calendar_selection\"
 calendar_provider: \"apple_calendar\"
-audio_source: \"system_audio\"
+audio_source: \"system_audio_and_microphone\"
 recording_started_at: \"2026-03-13T14:00:00Z\"
 recording_ended_at: \"2026-03-13T14:30:00Z\"
 calendar: \"Work\"
@@ -93,7 +93,7 @@ notes: |
 ---
 title: \"Quarterly planning kickoff and budget review with hiring updates\"
 source: \"manual_recording\"
-audio_source: \"system_audio\"
+audio_source: \"system_audio_and_microphone\"
 recording_started_at: \"2026-03-13T16:00:00Z\"
 recording_ended_at: \"2026-03-13T16:12:00Z\"
 ---

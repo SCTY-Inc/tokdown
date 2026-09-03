@@ -19,8 +19,9 @@ final class MenuBarCoordinator {
 
     private let calendarService = CalendarService()
     private let recordingService = RecordingService()
-    private let micFallbackRecorder = RecordingService()
+    private let meetingMicrophoneRecorder = RecordingService()
     private let systemAudioService = SystemAudioService()
+    private let audioMixingService = AudioMixingService()
     private let transcriptionService = TranscriptionService()
     private let storageService = StorageService()
     private let transcriptFormatter = TranscriptFormatter()
@@ -28,7 +29,8 @@ final class MenuBarCoordinator {
     private var startTime: Date?
     private var currentMeeting: UpcomingMeeting?
     private var currentAudioSource: AudioSource?
-    private var pendingMicFallbackURL: URL?
+    private var pendingPrimaryAudioURL: URL?
+    private var pendingMeetingMicrophoneURL: URL?
     private var timerTask: Task<Void, Never>?
     private var isHandlingRecordingAction = false
     @ObservationIgnored private var calendarChangeObserver: NSObjectProtocol?
@@ -103,11 +105,13 @@ final class MenuBarCoordinator {
 
         setStatusMessage(nil)
 
-        if !useSystemAudio {
-            guard await recordingService.requestMicrophonePermission() else {
-                setStatusMessage("Microphone permission denied.")
-                return
-            }
+        let microphoneRecorder = useSystemAudio ? meetingMicrophoneRecorder : recordingService
+        guard await microphoneRecorder.requestMicrophonePermission() else {
+            let message = useSystemAudio
+                ? "Microphone permission denied. Meeting Audio needs it to record you."
+                : "Microphone permission denied."
+            setStatusMessage(message)
+            return
         }
 
         var pendingAudioURL: URL?
@@ -118,12 +122,20 @@ final class MenuBarCoordinator {
 
             if useSystemAudio {
                 try await systemAudioService.startCapture(to: audioURL)
-                await startMicFallbackIfEnabled(startTime: now)
+                do {
+                    let microphoneURL = try storageService.temporaryAudioURL(startTime: now)
+                    try meetingMicrophoneRecorder.startRecording(to: microphoneURL)
+                    pendingMeetingMicrophoneURL = microphoneURL
+                } catch {
+                    _ = try? await systemAudioService.stopCapture()
+                    throw error
+                }
             } else {
                 try recordingService.startRecording(to: audioURL)
             }
 
-            startTime = now
+            pendingPrimaryAudioURL = audioURL
+            startTime = Date()
             activeTitle = label
             currentMeeting = meeting
             currentAudioSource = sessionAudioSource
@@ -132,6 +144,11 @@ final class MenuBarCoordinator {
             elapsedSeconds = 0
             startElapsedTimer()
         } catch {
+            if pendingMeetingMicrophoneURL != nil,
+               let microphoneURL = meetingMicrophoneRecorder.stopRecording() {
+                storageService.deleteFile(microphoneURL)
+            }
+            pendingMeetingMicrophoneURL = nil
             if let pendingAudioURL {
                 storageService.deleteFile(pendingAudioURL)
             }
@@ -147,30 +164,99 @@ final class MenuBarCoordinator {
         stopElapsedTimer()
         captureWarning = nil
 
-        // Stop the parallel mic-fallback capture (if any) regardless of how the primary ends.
-        let micFallbackURL = pendingMicFallbackURL != nil ? micFallbackRecorder.stopRecording() : nil
-        pendingMicFallbackURL = nil
+        let microphoneURL = pendingMeetingMicrophoneURL != nil
+            ? meetingMicrophoneRecorder.stopRecording()
+            : nil
+        pendingMeetingMicrophoneURL = nil
+        let sessionPrimaryAudioURL = pendingPrimaryAudioURL
+        pendingPrimaryAudioURL = nil
 
-        let audioURL: URL?
+        var effectiveAudioSource = Self.recordingSessionAudioSource(
+            activeSessionAudioSource: currentAudioSource,
+            settingsAudioSource: settingsStore.settings.audioSource
+        )
+        var captureCompletionMessage: String?
+        let primaryAudioURL: URL?
         if systemAudioService.isRecording {
             do {
-                audioURL = try await systemAudioService.stopCapture()
+                primaryAudioURL = try await systemAudioService.stopCapture()
             } catch {
-                if let micFallbackURL { storageService.deleteFile(micFallbackURL) }
-                setStatusMessage(error.localizedDescription)
+                let retainedSystemAudio = retainMeetingAudioFiles(
+                    systemAudioURL: sessionPrimaryAudioURL,
+                    microphoneURL: nil
+                )
+                let recoverySuffix = retainedSystemAudio.isEmpty
+                    ? ""
+                    : " Kept the partial system recording for recovery."
+                if let microphoneURL {
+                    primaryAudioURL = microphoneURL
+                    effectiveAudioSource = .microphone
+                    captureCompletionMessage = "System audio failed; transcript contains microphone audio only: \(error.localizedDescription)\(recoverySuffix)"
+                } else {
+                    setStatusMessage("Meeting recording failed: \(error.localizedDescription)\(recoverySuffix)")
+                    resetSessionState()
+                    await loadMeetings()
+                    return
+                }
+            }
+        } else {
+            primaryAudioURL = recordingService.stopRecording()
+        }
+
+        guard let primaryAudioURL else {
+            let retained = retainMeetingAudioFiles(systemAudioURL: nil, microphoneURL: microphoneURL)
+            let suffix = retained.isEmpty ? "" : " Kept the microphone recording for recovery."
+            setStatusMessage("No primary audio file.\(suffix)")
+            resetSessionState()
+            return
+        }
+
+        var audioURL = primaryAudioURL
+        var componentCleanupFailure: String?
+
+        if effectiveAudioSource == .systemAudio {
+            guard let microphoneURL else {
+                let retained = retainMeetingAudioFiles(systemAudioURL: primaryAudioURL, microphoneURL: nil)
+                let suffix = retained.isEmpty ? "" : " Kept the system recording for recovery."
+                setStatusMessage("Meeting recording incomplete: no microphone audio was captured.\(suffix)")
                 resetSessionState()
                 await loadMeetings()
                 return
             }
-        } else {
-            audioURL = recordingService.stopRecording()
-        }
 
-        guard let audioURL else {
-            if let micFallbackURL { storageService.deleteFile(micFallbackURL) }
-            setStatusMessage("No audio file.")
-            resetSessionState()
-            return
+            var mixedAudioURL: URL?
+            do {
+                setStatusMessage("Combining meeting audio...", isError: false)
+                let outputURL = try storageService.temporaryAudioURL(startTime: startTime ?? Date())
+                mixedAudioURL = outputURL
+                audioURL = try await audioMixingService.mix(
+                    systemAudioURL: primaryAudioURL,
+                    microphoneURL: microphoneURL,
+                    outputURL: outputURL
+                )
+
+                let cleanupResults = [primaryAudioURL, microphoneURL].map(storageService.deleteFile)
+                let failures = cleanupResults.compactMap { result -> String? in
+                    guard case .failed(let message) = result else { return nil }
+                    return message
+                }
+                if !failures.isEmpty {
+                    componentCleanupFailure = failures.joined(separator: "; ")
+                }
+            } catch {
+                if let mixedAudioURL { storageService.deleteFile(mixedAudioURL) }
+                let retained = retainMeetingAudioFiles(
+                    systemAudioURL: primaryAudioURL,
+                    microphoneURL: microphoneURL
+                )
+                let suffix = retained.isEmpty
+                    ? ""
+                    : " Kept both source recordings for recovery."
+                setStatusMessage("Could not combine meeting audio: \(error.localizedDescription)\(suffix)")
+                resetSessionState()
+                await loadMeetings()
+                return
+            }
         }
 
         let recordingEndTime = Date()
@@ -180,44 +266,25 @@ final class MenuBarCoordinator {
             setStatusMessage("Preparing local speech model...", isError: false)
         }
 
-        // Transcribe the primary capture.
         var lines: [TranscriptLine] = []
         var fullText = ""
         var transcriptionSucceeded = false
-        var effectiveAudioSource = Self.recordingSessionAudioSource(
-            activeSessionAudioSource: currentAudioSource,
-            settingsAudioSource: settingsStore.settings.audioSource
-        )
 
         do {
             let result = try await transcriptionService.transcribe(audioURL: audioURL)
             fullText = result.fullText
             lines = result.lines
             transcriptionSucceeded = true
-            setStatusMessage(nil)
+            let cleanupMessage = componentCleanupFailure.map {
+                "Combined meeting audio, but failed to delete source audio: \($0)"
+            }
+            setStatusMessage(cleanupMessage ?? captureCompletionMessage)
         } catch {
             setStatusMessage("Transcription: \(error.localizedDescription)")
             fullText = TranscriptFormatter.failedPlaceholder
         }
 
-        // Mic fallback: if the system-audio transcript is empty/placeholder, try the
-        // parallel mic recording before giving up. Exactly one audio file survives below.
-        var usedAudioURL = audioURL
-        if let micFallbackURL {
-            let primaryUsable = transcriptionSucceeded && !TranscriptFormatter.isPlaceholder(fullText)
-            if !primaryUsable, let micResult = try? await transcriptionService.transcribe(audioURL: micFallbackURL),
-               !TranscriptFormatter.isPlaceholder(micResult.fullText) {
-                fullText = micResult.fullText
-                lines = micResult.lines
-                transcriptionSucceeded = true
-                effectiveAudioSource = .microphone
-                storageService.deleteFile(audioURL)   // discard the silent system capture
-                usedAudioURL = micFallbackURL
-                setStatusMessage("System audio was silent — used microphone fallback.", isError: false)
-            } else {
-                storageService.deleteFile(micFallbackURL)  // primary usable, or mic also empty
-            }
-        }
+        let usedAudioURL = audioURL
 
         // Save transcript.
         var didWriteTranscript = false
@@ -279,18 +346,16 @@ final class MenuBarCoordinator {
         await loadMeetings()
     }
 
-    /// Starts a parallel microphone capture so a silent system-audio tap can fall back to
-    /// the mic. Best-effort: any failure (permission denied, recorder busy) is non-fatal.
-    private func startMicFallbackIfEnabled(startTime: Date) async {
-        guard settingsStore.settings.systemAudioMicFallback else { return }
-        guard await micFallbackRecorder.requestMicrophonePermission() else { return }
-        guard let micURL = try? storageService.temporaryAudioURL(startTime: startTime) else { return }
-        do {
-            try micFallbackRecorder.startRecording(to: micURL)
-            pendingMicFallbackURL = micURL
-        } catch {
-            pendingMicFallbackURL = nil
-        }
+    private func retainMeetingAudioFiles(systemAudioURL: URL?, microphoneURL: URL?) -> [URL] {
+        let baseName = Self.fallbackAudioBaseName(startTime: startTime, title: activeTitle)
+        return [
+            systemAudioURL.flatMap {
+                storageService.retainAudio($0, baseName: "\(baseName)-system", in: settingsStore.saveFolderURL)
+            },
+            microphoneURL.flatMap {
+                storageService.retainAudio($0, baseName: "\(baseName)-microphone", in: settingsStore.saveFolderURL)
+            }
+        ].compactMap { $0 }
     }
 
     private func resetSessionState() {
@@ -298,7 +363,8 @@ final class MenuBarCoordinator {
         activeTitle = nil
         currentMeeting = nil
         currentAudioSource = nil
-        pendingMicFallbackURL = nil
+        pendingPrimaryAudioURL = nil
+        pendingMeetingMicrophoneURL = nil
         state = .idle
     }
 
@@ -329,8 +395,7 @@ final class MenuBarCoordinator {
                 if currentAudioSource == .systemAudio {
                     captureWarning = Self.silenceWarningMessage(
                         elapsedSeconds: elapsedSeconds,
-                        hasAudibleSignal: systemAudioService.hasCapturedAudibleSignal(),
-                        micFallbackEnabled: settingsStore.settings.systemAudioMicFallback
+                        hasAudibleSignal: systemAudioService.hasCapturedAudibleSignal()
                     )
                 }
             }
@@ -410,13 +475,10 @@ final class MenuBarCoordinator {
 
     nonisolated static func silenceWarningMessage(
         elapsedSeconds: Int,
-        hasAudibleSignal: Bool,
-        micFallbackEnabled: Bool
+        hasAudibleSignal: Bool
     ) -> String? {
         guard elapsedSeconds >= silenceGraceSeconds, !hasAudibleSignal else { return nil }
-        return micFallbackEnabled
-            ? "No system audio yet — capturing microphone as fallback. Check output routing in System Settings ▸ Sound."
-            : "No system audio detected — check output routing in System Settings ▸ Sound, or record Microphone instead."
+        return "No system audio yet — your microphone is still being recorded. Check output routing in System Settings ▸ Sound."
     }
 
     nonisolated static func retentionStatusMessage(

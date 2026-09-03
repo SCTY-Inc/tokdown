@@ -4,7 +4,7 @@
 
 **Talk in. Markdown out.**
 
-TokDown is a macOS menu bar app that records system audio or microphone input and transcribes it to markdown — entirely on-device, using Apple's new [SpeechTranscriber](https://developer.apple.com/documentation/speech/speechtranscriber) API introduced in macOS Tahoe (macOS 26).
+TokDown is a macOS menu bar app that records everyone in a meeting — the people heard through system audio plus the person using the Mac's microphone — and transcribes the conversation to markdown entirely on-device. A microphone-only mode is available for dictation and in-person conversations. It uses Apple's new [SpeechTranscriber](https://developer.apple.com/documentation/speech/speechtranscriber) API introduced in macOS Tahoe (macOS 26).
 
 ## Apple's on-device transcription (WWDC 2025, macOS 26 Tahoe)
 
@@ -32,22 +32,22 @@ Quality is comparable to Whisper Large V3 on conversational speech. It handles d
 
 Most transcription tools trap your notes in another app or SaaS dashboard. TokDown writes plain markdown files to a folder — searchable, versionable, and ready to feed into agents, prompts, and automations.
 
-- Record meetings, calls, demos, and research audio from system audio or your microphone
+- Record both sides of meetings and calls, with or without headphones
 - Get timestamped markdown with YAML front matter (calendar metadata, attendees, links)
 - No audio files kept — temporary capture audio is deleted permanently after transcription
-- No dependencies, no accounts, no API keys
-- ~1,600 lines of Swift, no external packages
+- No dependencies, no accounts, no API keys in the macOS app
+- Plain Swift using Apple frameworks
 
 ## How it works
 
 1. Click the menu bar icon
 2. Pick an upcoming calendar meeting or start recording immediately
-3. Open Settings any time to choose whether TokDown records System Audio or Microphone by default
+3. Leave **Meeting Audio** selected to record both system output and your microphone, or choose **Microphone Only** for dictation and in-person conversations
 4. Stop when done
-5. TokDown transcribes and saves a `.md` file — typically in under a minute
-6. If system-audio capture never receives any audio, TokDown reports an error instead of saving an empty transcript
+5. TokDown combines the two meeting tracks locally, transcribes them, and saves a `.md` file — typically in under a minute
+6. If either meeting track fails, TokDown reports the incomplete capture instead of silently presenting it as a complete meeting
 7. The latest transcript can be opened directly from the menu bar
-8. On a successful transcript the temporary audio file is deleted permanently; if the transcript comes back empty, the audio is **kept** in the save folder so it can be re-transcribed or listened back
+8. On a successful transcript all temporary audio is deleted permanently; if transcription or audio preparation fails, recoverable audio is **kept** in the save folder
 
 Transcripts are saved to `~/Documents/Transcripts/` by default:
 
@@ -58,7 +58,7 @@ Transcripts are saved to `~/Documents/Transcripts/` by default:
 
 Meeting recordings use the calendar event title. Manual recordings infer a title from the transcript text. If two recordings share the same title within the same minute, TokDown appends `-2`, `-3`, and so on instead of overwriting the earlier file.
 
-Raw audio is recorded to a TokDown-owned temporary session folder, used for transcription, then permanently deleted — **except** when transcription returns nothing usable, in which case the audio is moved into the save folder beside where the transcript would be, so a failed capture is recoverable instead of lost. The selected transcript folder otherwise receives markdown files only.
+Raw audio is recorded to a TokDown-owned temporary session folder. Meeting Audio captures system output and microphone into separate temporary tracks, combines them locally into one transcription input, and permanently deletes the source tracks. The combined audio is also deleted after successful transcription. If transcription or mixing returns nothing usable, recoverable audio is moved into the save folder so the meeting is not silently lost. The selected transcript folder otherwise receives markdown files only.
 
 After a successful save, the menu bar shows **Open Latest Transcript** so the newest markdown file is one click away without changing the app's folder-first workflow.
 
@@ -68,7 +68,7 @@ After a successful save, the menu bar shows **Open Latest Transcript** so the ne
 ---
 title: "Standup"
 source: "calendar_selection"
-audio_source: "system_audio"
+audio_source: "system_audio_and_microphone"
 recording_started_at: "2026-03-09T14:00:00-04:00"
 recording_ended_at: "2026-03-09T14:30:00-04:00"
 calendar: "Work"
@@ -132,20 +132,20 @@ bash scripts/build-app.sh release
 2. Unzip and move `TokDown.app` to `/Applications`
 3. Launch — if macOS warns on first run, right-click → **Open**
 
-Open **Settings** from the menu bar to change the save folder and persist the default audio input across relaunches.
+Open **Settings** from the menu bar to change the save folder and choose between Meeting Audio and Microphone Only across relaunches.
 
 ## Permissions
 
 On first relevant use, macOS may prompt for:
 
-- **Audio Recording** — captures system audio via a Core Audio process tap when System Audio is selected (survives lid-closed / display-off, unlike screen capture)
-- **Microphone** — captures live microphone input when Microphone is selected, or as a fallback for System Audio when that option is enabled
+- **Audio Recording** — captures the people heard through system audio as one part of Meeting Audio (survives lid-closed / display-off, unlike screen capture)
+- **Microphone** — captures the local speaker for Meeting Audio, or the complete recording in Microphone Only mode
 - **Speech Recognition** — checked before recording starts because transcription is required for the end-to-end flow
 - **Calendar** (optional, full access) — shows upcoming meetings in the menu; write-only access is not enough to read them
 
 ## Stack
 
-~1,600 lines of Swift 6. No external dependencies.
+The macOS app is plain Swift 6 with no external dependencies. The iOS companion under `Apps/iOS/` uses `swift-opus` to receive audio from a Limitless Pendant.
 
 | Framework | Purpose |
 |---|---|
@@ -163,7 +163,8 @@ Sources/TokDown/
 ├── MenuBarIconView.swift       # Custom menu bar icon states
 ├── MenuBarViews.swift          # Menu bar + Settings window
 ├── SystemAudioService.swift    # Core Audio process-tap capture + level metering
-├── RecordingService.swift      # AVAudioRecorder (mic fallback)
+├── RecordingService.swift      # AVAudioRecorder microphone capture
+├── AudioMixingService.swift    # Local system + microphone mix for transcription
 ├── TranscriptionService.swift  # SpeechTranscriber + SpeechAnalyzer pipeline
 ├── TranscriptFormatter.swift   # Front matter + markdown rendering
 ├── StorageService.swift        # Transcript paths and temporary audio cleanup

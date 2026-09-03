@@ -4,7 +4,7 @@ Scope: this repository
 
 ## What this repo is
 
-TokDown is a macOS menu bar app that captures system audio or microphone input and saves agent-ready markdown transcripts.
+TokDown is one repository containing a macOS menu bar meeting recorder at the root and an iOS Limitless Pendant companion under `Apps/iOS/`. The macOS app captures system output and microphone audio together for meetings, then saves agent-ready markdown transcripts.
 
 Core product constraints:
 - local transcription only
@@ -22,6 +22,8 @@ Core product constraints:
 ├── README.md
 ├── AGENTS.md
 ├── CLAUDE.md
+├── Apps/
+│   └── iOS/                 # Limitless Pendant iOS app (XcodeGen project)
 ├── scripts/
 │   └── build-app.sh
 ├── icon.png
@@ -44,6 +46,7 @@ Core product constraints:
         ├── MenuBarViews.swift
         ├── SystemAudioService.swift
         ├── RecordingService.swift
+        ├── AudioMixingService.swift
         ├── TranscriptionService.swift
         ├── TranscriptFormatter.swift
         ├── CalendarService.swift
@@ -63,7 +66,8 @@ Core product constraints:
 - `Sources/TokDown/MenuBarCoordinator.swift` — state machine, permission gating, and orchestration
 - `Sources/TokDown/MenuBarViews.swift` — menu bar content and settings UI, including latest transcript and audio source selection
 - `Sources/TokDown/SystemAudioService.swift` — system audio capture via a Core Audio process tap (+ live level metering)
-- `Sources/TokDown/RecordingService.swift` — microphone capture fallback
+- `Sources/TokDown/RecordingService.swift` — microphone capture for meetings and microphone-only sessions
+- `Sources/TokDown/AudioMixingService.swift` — combines system and microphone tracks locally before transcription
 - `Sources/TokDown/TranscriptionService.swift` — Apple SpeechTranscriber pipeline
 - `Sources/TokDown/TranscriptFormatter.swift` — front matter, title inference, and markdown rendering
 - `Sources/TokDown/StorageService.swift` — transcript paths, deletion, and temporary `.m4a` cleanup on startup
@@ -160,7 +164,7 @@ Do not:
 - The menu exposes the latest saved transcript directly and does not maintain a transcript database. Audio is normally deleted after transcription, but is **retained** in the save folder when the transcript comes back empty/placeholder, so a silent capture is recoverable.
 - System-audio capture uses a **Core Audio process tap** (`AudioHardwareCreateProcessTap` + a private aggregate device anchored to the default output device), not ScreenCaptureKit. The tap anchors to an audio device, so it survives lid-closed / display-off / screen-lock — the failure mode that made the old display-bound SCK path capture silence.
 - `SystemAudioService` meters per-buffer peak amplitude on the IO-proc thread; `MenuBarCoordinator` polls `hasCapturedAudibleSignal()` and shows a live warning if a system-audio capture looks silent past an 8s grace.
-- When "Capture microphone as fallback for system audio" is enabled, a parallel mic recording runs during system-audio sessions; if the system transcript is empty, TokDown transcribes the mic recording instead and tags the source `microphone`.
+- Meeting Audio always records system output and microphone in parallel, locally mixes the tracks into one temporary `.m4a`, and transcribes that mix. This records both sides with speakers or headphones. If system capture fails, TokDown transcribes the surviving microphone track and reports that the meeting capture was incomplete.
 - Audio capture writes via `AVAudioFile` inside a Core Audio real-time IO proc (`AudioDeviceCreateIOProcIDWithBlock` with a nil queue → CA-owned thread, not main); `TapWriter` (`@unchecked Sendable`) serializes file access and metering with an `NSLock`. The IO-proc block **must** be typed `@convention(block) @Sendable`: it is created inside `@MainActor SystemAudioService.startCapture`, so without `@Sendable` Swift 6 infers MainActor isolation and emits an executor assertion at the block's entry — which traps (`SIGTRAP`/`dispatch_assert_queue`) on the first buffer when CA runs it off-main.
 - `SystemAudioService.stopCapture()` is `async throws` — propagates `SystemAudioError.noAudioCaptured` when zero frames were written and `SystemAudioError.writeFailed`/`.tapCreationFailed`/`.aggregateCreationFailed` on Core Audio errors.
 - `TranscriptionService.transcribe()` uses a duration-scaled timeout (`max(300, duration×2 + 60)`, or 1800s when duration is unreadable) implemented as a `withThrowingTaskGroup` race; throws `TranscriptionError.timeout` if the pipeline stalls. The old fixed 300s cap false-failed long recordings.
@@ -204,7 +208,8 @@ Manual verification checklist:
 - transcript filenames stay date-first, use a meaningful title instead of a generic `Recording`, and avoid overwriting same-minute collisions
 - temporary audio file is permanently deleted after transcription instead of being moved to Trash
 - the selected transcript folder contains markdown output only, not temporary audio
-- settings window opens, saves changes, and persists the selected audio source
+- settings window opens, saves changes, and persists Meeting Audio or Microphone Only
+- Meeting Audio captures both a remote voice from system output and a local voice from the microphone, including when headphones are connected
 - permission prompts and denied/upgrade-required status messages still make sense for the changed workflow
 - system-audio recordings fail loudly instead of silently writing `(No transcript)` when no audio samples arrive
 
@@ -217,7 +222,7 @@ Expected output shape:
 title: "Meeting Title"
 source: "calendar_selection"
 calendar_provider: "apple_calendar"
-audio_source: "system_audio"
+audio_source: "system_audio_and_microphone"
 recording_started_at: "2026-03-09T14:00:00-04:00"
 recording_ended_at: "2026-03-09T14:30:00-04:00"
 calendar: "Work"
