@@ -8,12 +8,6 @@ MEMORY.md
 TokDown.app/
 TokDown.app.zip
 
-# Audio (transcripts only)
-*.m4a
-*.wav
-*.mp3
-*.aac
-
 # Signing artifacts
 *.key
 *.p12

@@ -18,6 +18,7 @@ Package.swift
 Sources/TokDown/
   TokDownApp.swift            app entry, menu bar scene, settings window
   MenuBarCoordinator.swift    state machine, permission gating, orchestration
+  MenuBarCoordinator+Messages.swift  pure status-message and naming helpers
   MenuBarViews.swift          menu content and settings UI
   MenuBarIconView.swift       menu bar icon states
   SystemAudioService.swift    Core Audio process tap + level metering
