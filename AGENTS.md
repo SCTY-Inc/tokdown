@@ -2,7 +2,7 @@
 
 One repo, two apps:
 - **macOS menu bar meeting recorder** — the root Swift package. Captures system output and microphone together and saves local markdown transcripts.
-- **iOS Limitless Pendant companion** — `Apps/iOS/`, an XcodeGen project with its own `CLAUDE.md`. It arrived by subtree merge from tokdown-mobile. Nothing is shared between the apps yet; the next step is extracting `Sources/TokDownKit` (formatter, transcription protocol, calendar and settings cores).
+- **iOS Limitless Pendant companion** — `iOS/`, an XcodeGen project with its own `CLAUDE.md`. It arrived by subtree merge from tokdown-mobile. Nothing is shared between the apps yet; the next step is extracting a shared `Shared/` target (formatter, transcription protocol, calendar and settings cores).
 
 Product constraints (macOS):
 - local transcription only; no cloud, no API keys, no third-party dependencies
@@ -15,7 +15,7 @@ Product constraints (macOS):
 
 ```text
 Package.swift
-Sources/TokDown/
+macOS/
   TokDownApp.swift            app entry, menu bar scene, settings window
   MenuBarCoordinator.swift    state machine, permission gating, orchestration
   MenuBarCoordinator+Messages.swift  pure status-message and naming helpers
@@ -31,11 +31,11 @@ Sources/TokDown/
   SettingsStore.swift         preferences
   AppModels.swift             data types
   Resources/                  Info.plist, entitlements, TokDownIcon.png (1024px, -> .icns at build)
-Tests/TokDownTests/           XCTest + Swift Testing
+Tests/                        XCTest + Swift Testing
 scripts/
   build-app.sh                build, bundle, sign (dev identity)
   mac-release.sh              Developer ID sign, notarize, staple, zip (copy of the shared ios skill script)
-Apps/iOS/                     iOS app (run `xcodegen generate`; the .xcodeproj is not tracked)
+iOS/                          iOS app: App/, Tests/, project.yml (run `xcodegen generate`; .xcodeproj is not tracked)
 ```
 
 ## Commands
@@ -50,7 +50,7 @@ Ship a notarized release (needs a `Developer ID Application` identity and a `not
 
 ```bash
 bash scripts/build-app.sh release
-bash scripts/mac-release.sh TokDown.app Sources/TokDown/Resources/TokDown.entitlements
+bash scripts/mac-release.sh TokDown.app macOS/Resources/TokDown.entitlements
 gh release create vX.Y.Z TokDown.app.zip
 ```
 

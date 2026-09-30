@@ -1,6 +1,6 @@
 # TokDown
 
-<img src="Sources/TokDown/Resources/TokDownIcon.png" width="128" alt="TokDown app icon">
+<img src="macOS/Resources/TokDownIcon.png" width="128" alt="TokDown app icon">
 
 **Talk in. Markdown out.**
 
@@ -109,7 +109,7 @@ With several signing identities, pick one: `SIGNING_IDENTITY="Apple Development:
 
 ## Stack
 
-Plain Swift 6, no dependencies. This repo also holds an iOS companion for the Limitless Pendant in [`Apps/iOS/`](Apps/iOS/).
+Plain Swift 6, no dependencies. This repo also holds an iOS companion for the Limitless Pendant in [`iOS/`](iOS/).
 
 | Framework | Purpose |
 |---|---|

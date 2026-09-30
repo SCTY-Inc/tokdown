@@ -12,7 +12,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "TokDown",
-            path: "Sources/TokDown",
+            path: "macOS",
             exclude: [
                 "Resources/Info.plist",
                 "Resources/TokDown.entitlements",
@@ -22,7 +22,7 @@ let package = Package(
         .testTarget(
             name: "TokDownTests",
             dependencies: ["TokDown"],
-            path: "Tests/TokDownTests"
+            path: "Tests"
         )
     ]
 )

@@ -20,14 +20,14 @@ targets:
     dependencies:
       - package: Opus
     sources:
-      - path: Sources/TokDown
+      - path: App
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.amadad.tokdown
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         PRODUCT_NAME: TokDown
         GENERATE_INFOPLIST_FILE: NO
-        INFOPLIST_FILE: Sources/TokDown/Info.plist
+        INFOPLIST_FILE: App/Info.plist
         CODE_SIGN_STYLE: Automatic
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: 0.1.0
@@ -40,7 +40,7 @@ targets:
     platform: iOS
     deploymentTarget: "18.0"
     sources:
-      - path: Tests/TokDownTests
+      - path: Tests
     dependencies:
       - target: TokDown
     settings:

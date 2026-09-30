@@ -9,8 +9,8 @@ TARGET_NAME="TokDown"
 APP_NAME="TokDown"
 APP_BUNDLE_NAME="${APP_NAME}.app"
 APP_BUNDLE_PATH="${PROJECT_DIR}/${APP_BUNDLE_NAME}"
-INFO_PLIST_SOURCE="${PROJECT_DIR}/Sources/${TARGET_NAME}/Resources/Info.plist"
-ENTITLEMENTS_SOURCE="${PROJECT_DIR}/Sources/${TARGET_NAME}/Resources/${TARGET_NAME}.entitlements"
+INFO_PLIST_SOURCE="${PROJECT_DIR}/macOS/Resources/Info.plist"
+ENTITLEMENTS_SOURCE="${PROJECT_DIR}/macOS/Resources/${TARGET_NAME}.entitlements"
 
 if [[ "$CONFIG" != "debug" && "$CONFIG" != "release" ]]; then
   echo "Usage: ./scripts/build-app.sh [debug|release]" >&2
@@ -36,7 +36,7 @@ cp "$BINARY_PATH" "${APP_BUNDLE_PATH}/Contents/MacOS/${TARGET_NAME}"
 cp "$INFO_PLIST_SOURCE" "${APP_BUNDLE_PATH}/Contents/Info.plist"
 
 # Generate .icns from the 1024px PNG icon source.
-ICON_PNG="${PROJECT_DIR}/Sources/${TARGET_NAME}/Resources/TokDownIcon.png"
+ICON_PNG="${PROJECT_DIR}/macOS/Resources/TokDownIcon.png"
 ICONSET_DIR="${PROJECT_DIR}/.build/TokDown.iconset"
 rm -rf "$ICONSET_DIR"
 mkdir -p "$ICONSET_DIR"
