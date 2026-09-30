@@ -18,11 +18,7 @@ final class RecordingService {
         let status = AVCaptureDevice.authorizationStatus(for: .audio)
         if let resolved = Self.microphoneAccessGranted(for: status) { return resolved }
 
-        return await withCheckedContinuation { continuation in
-            AVCaptureDevice.requestAccess(for: .audio) { granted in
-                continuation.resume(returning: granted)
-            }
-        }
+        return await AVCaptureDevice.requestAccess(for: .audio)
     }
 
     func startRecording(to url: URL) throws {

@@ -171,7 +171,7 @@ Do not:
 - Target platform: `macOS 26+`
 - Uses `@Observable` (Observation framework) — not `ObservableObject`/`@Published`. Views use `@State`/`@Environment`, not `@StateObject`/`@EnvironmentObject`.
 - The app uses Apple’s newer on-device SpeechTranscriber pipeline.
-- Speech recognition permission and SpeechTranscriber asset availability are checked before recording starts because the product promise is transcript-first, not raw-audio capture.
+- SpeechTranscriber asset availability is checked before recording starts because the product promise is transcript-first, not raw-audio capture.
 - The menu exposes the latest saved transcript directly and does not maintain a transcript database. Audio is normally deleted after transcription, but is **retained** in the save folder when the transcript comes back empty/placeholder, so a silent capture is recoverable.
 - System-audio capture uses a **Core Audio process tap** (`AudioHardwareCreateProcessTap` + a private aggregate device anchored to the default output device), not ScreenCaptureKit. The tap anchors to an audio device, so it survives lid-closed / display-off / screen-lock — the failure mode that made the old display-bound SCK path capture silence.
 - `SystemAudioService` meters per-buffer peak amplitude on the IO-proc thread; `MenuBarCoordinator` polls `hasCapturedAudibleSignal()` and shows a live warning if a system-audio capture looks silent past an 8s grace.

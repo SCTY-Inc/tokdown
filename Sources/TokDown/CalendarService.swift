@@ -48,11 +48,8 @@ final class CalendarService: NSObject {
             return accessState
         }
 
-        return await withCheckedContinuation { continuation in
-            store.requestFullAccessToEvents { granted, _ in
-                continuation.resume(returning: granted ? .allowed : .denied)
-            }
-        }
+        let granted = (try? await store.requestFullAccessToEvents()) ?? false
+        return granted ? .allowed : .denied
     }
 
     nonisolated static func readAccessState(for status: EKAuthorizationStatus) -> CalendarReadAccessState? {

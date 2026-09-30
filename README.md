@@ -142,7 +142,6 @@ On first relevant use, macOS may prompt for:
 
 - **Audio Recording** — captures the people heard through system audio as one part of Meeting Audio (survives lid-closed / display-off, unlike screen capture)
 - **Microphone** — captures the local speaker for Meeting Audio, or the complete recording in Microphone Only mode
-- **Speech Recognition** — checked before recording starts because transcription is required for the end-to-end flow
 - **Calendar** (optional, full access) — shows upcoming meetings in the menu; write-only access is not enough to read them
 
 ## Stack

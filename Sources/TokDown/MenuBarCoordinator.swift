@@ -82,12 +82,6 @@ final class MenuBarCoordinator {
         defer { isHandlingRecordingAction = false }
         setStatusMessage(nil)
 
-        let speechAccessState = await transcriptionService.speechRecognitionAccessState(requestingIfNeeded: true)
-        guard speechAccessState == .authorized else {
-            setStatusMessage(speechAccessState.failureMessage)
-            return
-        }
-
         let sessionAudioSource = settingsStore.settings.audioSource
         let label = meeting?.title ?? sessionAudioSource.title
         let useSystemAudio = sessionAudioSource == .systemAudio
