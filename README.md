@@ -9,7 +9,7 @@ TokDown is a macOS menu bar app that records everyone in a meeting — the peopl
 ## Install
 
 ```bash
-brew install --cask scty-inc/tap/tokdown
+brew install scty-inc/tap/tokdown
 ```
 
 Or download `TokDown.app.zip` from [Releases](../../releases), unzip, and move `TokDown.app` to `/Applications`. Requires macOS 26. Builds are notarized.
