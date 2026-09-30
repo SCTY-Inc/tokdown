@@ -16,7 +16,6 @@ let package = Package(
             exclude: [
                 "Resources/Info.plist",
                 "Resources/TokDown.entitlements",
-                "Resources/TokDownIcon.svg",
                 "Resources/TokDownIcon.png"
             ]
         ),

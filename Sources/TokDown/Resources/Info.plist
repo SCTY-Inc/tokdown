@@ -15,9 +15,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.1</string>
+	<string>1.0.2</string>
 	<key>CFBundleVersion</key>
-	<string>2</string>
+	<string>3</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSAudioCaptureUsageDescription</key>
@@ -28,5 +28,7 @@
 	<string>TokDown needs calendar access to show upcoming meetings as recording targets.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>TokDown uses the microphone to capture interviews and meetings.</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
 </dict>
 </plist>

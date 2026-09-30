@@ -1,232 +1,101 @@
 # AGENTS.md — TokDown
 
-Scope: this repository
+One repo, two apps:
+- **macOS menu bar meeting recorder** — the root Swift package. Captures system output and microphone together and saves local markdown transcripts.
+- **iOS Limitless Pendant companion** — `Apps/iOS/`, an XcodeGen project with its own `CLAUDE.md`. It arrived by subtree merge from tokdown-mobile. Nothing is shared between the apps yet; the next step is extracting `Sources/TokDownKit` (formatter, transcription protocol, calendar and settings cores).
 
-## What this repo is
-
-TokDown is one repository containing a macOS menu bar meeting recorder at the root and an iOS Limitless Pendant companion under `Apps/iOS/`. The macOS app captures system output and microphone audio together for meetings, then saves agent-ready markdown transcripts.
-
-Core product constraints:
-- local transcription only
-- no external dependencies
-- no API keys
-- audio files are permanently deleted after transcription
-- raw audio stays in TokDown-owned temporary storage, never the user-selected transcript folder
+Product constraints (macOS):
+- local transcription only; no cloud, no API keys, no third-party dependencies
+- raw audio stays in TokDown-owned temporary storage and is permanently deleted (not moved to Trash) after a usable transcript; it is kept in the save folder only when transcription returns nothing usable
 - output is plain markdown in a user-selected folder
+- three states: `idle -> recording -> transcribing -> idle`
+- menu bar only (`LSUIElement`), via `MenuBarExtra` with `.menu` style
 
-## Repo layout
+## Layout
 
 ```text
-.
-├── Package.swift
-├── README.md
-├── AGENTS.md
-├── CLAUDE.md
-├── Apps/
-│   └── iOS/                 # Limitless Pendant iOS app (XcodeGen project)
-├── scripts/
-│   └── build-app.sh
-├── icon.png
-├── Tests/
-│   └── TokDownTests/
-│       ├── CalendarServiceTests.swift
-│       ├── MenuBarCoordinatorTests.swift
-│       ├── MenuBarIconPresentationTests.swift
-│       ├── RecordingServiceTests.swift
-│       ├── SettingsStoreTests.swift
-│       ├── StorageServiceTests.swift
-│       ├── SystemAudioServiceTests.swift
-│       ├── TranscriptFormatterTests.swift
-│       └── TranscriptionServiceTests.swift
-└── Sources/
-    └── TokDown/
-        ├── TokDownApp.swift
-        ├── MenuBarCoordinator.swift
-        ├── MenuBarIconView.swift
-        ├── MenuBarViews.swift
-        ├── SystemAudioService.swift
-        ├── RecordingService.swift
-        ├── AudioMixingService.swift
-        ├── TranscriptionService.swift
-        ├── TranscriptFormatter.swift
-        ├── CalendarService.swift
-        ├── StorageService.swift
-        ├── SettingsStore.swift
-        ├── AppModels.swift
-        └── Resources/
-            ├── Info.plist
-            ├── TokDown.entitlements
-            ├── TokDownIcon.png
-            └── TokDownIcon.svg
+Package.swift
+Sources/TokDown/
+  TokDownApp.swift            app entry, menu bar scene, settings window
+  MenuBarCoordinator.swift    state machine, permission gating, orchestration
+  MenuBarViews.swift          menu content and settings UI
+  MenuBarIconView.swift       menu bar icon states
+  SystemAudioService.swift    Core Audio process tap + level metering
+  RecordingService.swift      microphone capture
+  AudioMixingService.swift    local system + mic mix before transcription
+  TranscriptionService.swift  SpeechTranscriber / SpeechAnalyzer pipeline
+  TranscriptFormatter.swift   front matter, title inference, markdown
+  StorageService.swift        transcript paths, temporary audio cleanup
+  CalendarService.swift       EventKit meetings and access states
+  SettingsStore.swift         preferences
+  AppModels.swift             data types
+  Resources/                  Info.plist, entitlements, TokDownIcon.png (1024px, -> .icns at build)
+Tests/TokDownTests/           XCTest + Swift Testing
+scripts/
+  build-app.sh                build, bundle, sign (dev identity)
+  mac-release.sh              Developer ID sign, notarize, staple, zip (copy of the shared ios skill script)
+Apps/iOS/                     iOS app (run `xcodegen generate`; the .xcodeproj is not tracked)
 ```
 
-## Important files
-
-- `Sources/TokDown/TokDownApp.swift` — app entry, menu bar scene, settings window
-- `Sources/TokDown/MenuBarCoordinator.swift` — state machine, permission gating, and orchestration
-- `Sources/TokDown/MenuBarViews.swift` — menu bar content and settings UI, including latest transcript and audio source selection
-- `Sources/TokDown/SystemAudioService.swift` — system audio capture via a Core Audio process tap (+ live level metering)
-- `Sources/TokDown/RecordingService.swift` — microphone capture for meetings and microphone-only sessions
-- `Sources/TokDown/AudioMixingService.swift` — combines system and microphone tracks locally before transcription
-- `Sources/TokDown/TranscriptionService.swift` — Apple SpeechTranscriber pipeline
-- `Sources/TokDown/TranscriptFormatter.swift` — front matter, title inference, and markdown rendering
-- `Sources/TokDown/StorageService.swift` — transcript paths, deletion, and temporary `.m4a` cleanup on startup
-- `Sources/TokDown/CalendarService.swift` — upcoming meetings and calendar permissions
-- `scripts/build-app.sh` — build, bundle, sign, and zip release artifact
-- `scripts/mac-release.sh` — Developer ID sign, notarize, staple, and zip for distribution (copy of the shared `ios` skill script)
-
-## How to run the project
-
-Build and launch a debug app bundle:
+## Commands
 
 ```bash
-bash scripts/build-app.sh debug
-open TokDown.app
-```
-
-Kill the running app:
-
-```bash
+swift test                                  # unit tests
+bash scripts/build-app.sh debug && open TokDown.app
 pkill -x TokDown
 ```
 
-Build a release bundle and zip for GitHub Releases:
-
-```bash
-bash scripts/build-app.sh release
-```
-
-Artifacts:
-- `TokDown.app`
-- `TokDown.app.zip`
-
-Ship a notarized release (needs a Developer ID identity and a `notary` notarytool profile):
+Ship a notarized release (needs a `Developer ID Application` identity and a `notary` notarytool profile). Bump `CFBundleShortVersionString` and `CFBundleVersion` in `Info.plist` first:
 
 ```bash
 bash scripts/build-app.sh release
 bash scripts/mac-release.sh TokDown.app Sources/TokDown/Resources/TokDown.entitlements
-gh release create vX.Y TokDown.app.zip
+gh release create vX.Y.Z TokDown.app.zip
 ```
 
 Then set `version` and the printed `sha256` in `Casks/tokdown.rb` in `SCTY-Inc/homebrew-tap`.
 
-## Build, test, and lint commands
+## Implementation notes
 
-There is no lint setup yet, but there is a focused XCTest suite covering transcript formatting, calendar access decisions, coordinator status handling, menu bar icon presentation, storage collision/cleanup behavior, temporary audio cleanup, system-audio rollback cleanup, system-audio zero-capture error reporting, speech-permission mapping, microphone permission-state mapping, and settings persistence.
+Swift 6 and concurrency:
+- `@Observable` only. No `ObservableObject`, `@Published`, `@StateObject`, or `@EnvironmentObject`.
+- All services are `@MainActor`. A closure created inside a `@MainActor` type inherits MainActor isolation and SIGTRAPs (`dispatch_assert_queue`) when the system calls it off-main. This has crashed Record twice: the Core Audio IO proc (2026-06-03) and the speech authorization callback (2026-09-30). Prefer the SDK's imported `async` API (`AVCaptureDevice.requestAccess`, `EKEventStore.requestFullAccessToEvents`); otherwise mark the closure `@Sendable`. Never `Task { @MainActor in }` inside a completion handler.
+- For non-observed properties used in `deinit` of an `@Observable` class, use `@ObservationIgnored` plus `isolated deinit`, not `nonisolated(unsafe)`.
 
-Use these checks before submitting changes:
+Audio capture:
+- System audio uses a **Core Audio process tap** (`AudioHardwareCreateProcessTap` + private aggregate device on the default output), not ScreenCaptureKit. SCK rode a display-bound stream and captured silence with the lid closed; the tap survives lid-close.
+- The IO-proc block must be `@convention(block) @Sendable`. It runs on a Core Audio RT thread; `TapWriter` (`@unchecked Sendable`) serializes `AVAudioFile` writes and peak metering with an `NSLock`. Reference: insidegui/AudioCap.
+- `SystemAudioService.stopCapture()` is `async throws`: `.noAudioCaptured` when zero frames were written, `.tapCreationFailed` / `.aggregateCreationFailed` / `.writeFailed` on Core Audio errors.
+- `MenuBarCoordinator` warns if system audio stays silent past `silenceGraceSeconds` (8).
+- Meeting Audio records system and mic tracks in parallel; `AudioMixingService` mixes them into one temporary `.m4a` for transcription. If system capture fails, the mic track is transcribed with an incomplete-capture warning.
 
-```bash
-swift test
-swift build -c debug
-bash scripts/build-app.sh debug
-bash scripts/build-app.sh release
-```
+Transcription:
+- SpeechTranscriber needs no speech-recognition authorization (verified 2026-09-30). Do not reintroduce `SFSpeechRecognizer.requestAuthorization` or `NSSpeechRecognitionUsageDescription`. Only model asset availability is preflighted before recording.
+- `SpeechAnalyzer` keep-alive: `_ = analyzer` must come **after** the `for try await` loop. ARC ends lifetime at last use.
+- `transcribe()` timeout is `max(300, duration×2 + 60)` seconds (1800 when duration is unreadable), raced in a `withThrowingTaskGroup`; throws `TranscriptionError.timeout`.
 
-Manual verification matters for this repo because permissions, menu bar rendering, and TCC behavior are runtime-sensitive.
+Storage, calendar, settings:
+- `StorageService` records under a TokDown temporary session folder and writes only `.md` to the selected folder. `loadMeetings()` calls `cleanupTemporaryAudioFiles()`, which deletes only `.m4a` files in TokDown temporary storage.
+- Filenames: `YYYY-MM-DD_HH-mm_Title[-2].md`, date-first, collision-safe. `latestTranscriptURL` backs "Open Latest Transcript".
+- Calendar needs full access; `.writeOnly` is upgrade-required, not success. `EKEventStore.changedNotification` refreshes meetings only when idle.
+- `SettingsStore.init(defaults:)` takes a `UserDefaults` suite; tests use `UserDefaults(suiteName: UUID().uuidString)`.
+- TCC permissions depend on code signing. Switching signing identity (dev -> Developer ID) resets grants once.
 
-## Engineering conventions
+## Verify
 
-- Keep the app small and dependency-free.
-- Prefer straightforward SwiftUI/AppKit integration over abstraction-heavy design.
-- Preserve the three-state flow:
-  - `idle -> recording -> transcribing -> idle`
-- Keep transcript output as plain markdown.
-- Prefer explicit file/service names over generic helpers.
-- Keep user-facing behavior local-first and privacy-preserving.
-- Update `README.md` when behavior, install steps, branding, or requirements change.
-- Update `AGENTS.md` when architecture, workflow, or contributor expectations change.
+A change is done when `swift test` passes, `build-app.sh debug` produces the app, and the changed workflow works in the running app. TCC, menu bar rendering, and audio capture are runtime-only, so check manually as relevant:
+- recording starts and stops; transcript lands in the chosen folder with a meaningful date-first name
+- Meeting Audio captures a remote voice (system output) and a local voice (mic), including with headphones
+- selected meetings add calendar front matter
+- temporary audio is permanently deleted; the transcript folder holds markdown only
+- silent system-audio capture fails loudly instead of writing `(No transcript)`
+- settings persist across relaunch
 
-## PR expectations
-
-A good PR for this repo should:
-- stay scoped to a clear user-facing improvement or bug fix
-- explain what changed and why
-- mention any permission, signing, or macOS-version implications
-- include manual verification notes
-- avoid unrelated renames or cleanup unless explicitly intended
-
-If the PR changes output format, permissions, packaging, or branding, update docs in the same PR.
-
-## Constraints and do-not rules
-
-Do:
-- use `read` before editing files
-- use the build script for app bundling/signing
-- keep generated transcript output markdown-only
-- preserve deletion of audio after transcript generation
-- preserve menu bar app behavior (`LSUIElement`)
-
-Do not:
-- add cloud transcription or API-key requirements without explicit approval
-- add third-party dependencies casually
-- keep raw audio files by default
-- break system-audio capture to optimize for mic-only workflows
-
-- commit generated app bundles or release zip files to git unless explicitly requested
-- use `rm`; use safer alternatives if file removal is needed
-
-## Platform and implementation notes
-
-- Target platform: `macOS 26+`
-- Uses `@Observable` (Observation framework) — not `ObservableObject`/`@Published`. Views use `@State`/`@Environment`, not `@StateObject`/`@EnvironmentObject`.
-- The app uses Apple’s newer on-device SpeechTranscriber pipeline.
-- SpeechTranscriber asset availability is checked before recording starts because the product promise is transcript-first, not raw-audio capture.
-- The menu exposes the latest saved transcript directly and does not maintain a transcript database. Audio is normally deleted after transcription, but is **retained** in the save folder when the transcript comes back empty/placeholder, so a silent capture is recoverable.
-- System-audio capture uses a **Core Audio process tap** (`AudioHardwareCreateProcessTap` + a private aggregate device anchored to the default output device), not ScreenCaptureKit. The tap anchors to an audio device, so it survives lid-closed / display-off / screen-lock — the failure mode that made the old display-bound SCK path capture silence.
-- `SystemAudioService` meters per-buffer peak amplitude on the IO-proc thread; `MenuBarCoordinator` polls `hasCapturedAudibleSignal()` and shows a live warning if a system-audio capture looks silent past an 8s grace.
-- Meeting Audio always records system output and microphone in parallel, locally mixes the tracks into one temporary `.m4a`, and transcribes that mix. This records both sides with speakers or headphones. If system capture fails, TokDown transcribes the surviving microphone track and reports that the meeting capture was incomplete.
-- Audio capture writes via `AVAudioFile` inside a Core Audio real-time IO proc (`AudioDeviceCreateIOProcIDWithBlock` with a nil queue → CA-owned thread, not main); `TapWriter` (`@unchecked Sendable`) serializes file access and metering with an `NSLock`. The IO-proc block **must** be typed `@convention(block) @Sendable`: it is created inside `@MainActor SystemAudioService.startCapture`, so without `@Sendable` Swift 6 infers MainActor isolation and emits an executor assertion at the block's entry — which traps (`SIGTRAP`/`dispatch_assert_queue`) on the first buffer when CA runs it off-main.
-- `SystemAudioService.stopCapture()` is `async throws` — propagates `SystemAudioError.noAudioCaptured` when zero frames were written and `SystemAudioError.writeFailed`/`.tapCreationFailed`/`.aggregateCreationFailed` on Core Audio errors.
-- `TranscriptionService.transcribe()` uses a duration-scaled timeout (`max(300, duration×2 + 60)`, or 1800s when duration is unreadable) implemented as a `withThrowingTaskGroup` race; throws `TranscriptionError.timeout` if the pipeline stalls. The old fixed 300s cap false-failed long recordings.
-- `MenuBarCoordinator` observes `EKEventStore.changedNotification` to auto-refresh meetings; only acts when `state == .idle` to avoid clobbering recording status messages. `loadMeetings()` also calls `StorageService.cleanupTemporaryAudioFiles` on each invocation to delete any `.m4a` files left behind in TokDown-owned temporary storage.
-- `SettingsStore.init(defaults:)` accepts a `UserDefaults` suite for test isolation; use `UserDefaults(suiteName: UUID().uuidString)` in tests.
-- Menu bar UI uses `MenuBarExtra` with `.menu` style, so layout behavior is constrained.
-- Permission prompts and TCC behavior depend on code signing; the build script signs the app automatically.
-- Upcoming meeting loading requires full calendar read access; `.writeOnly` should be treated as upgrade-required, not as a readable success state.
-
-## What done means
-
-A change is done when:
-- the code builds successfully
-- the app bundle is produced successfully
-- the changed workflow works in the running app
-- docs are updated if user-facing behavior changed
-- no unnecessary warnings or naming inconsistencies were introduced
-
-## How to verify work
-
-Minimum verification:
-
-```bash
-swift test
-swift build -c debug
-bash scripts/build-app.sh debug
-```
-
-For release-facing changes:
-
-```bash
-bash scripts/build-app.sh release
-```
-
-Manual verification checklist:
-- app launches from `TokDown.app`
-- menu bar icon appears correctly
-- recording can start and stop
-- transcript markdown is written to the chosen folder
-- selected meetings add calendar front matter to the transcript
-- transcript filenames stay date-first, use a meaningful title instead of a generic `Recording`, and avoid overwriting same-minute collisions
-- temporary audio file is permanently deleted after transcription instead of being moved to Trash
-- the selected transcript folder contains markdown output only, not temporary audio
-- settings window opens, saves changes, and persists Meeting Audio or Microphone Only
-- Meeting Audio captures both a remote voice from system output and a local voice from the microphone, including when headphones are connected
-- permission prompts and denied/upgrade-required status messages still make sense for the changed workflow
-- system-audio recordings fail loudly instead of silently writing `(No transcript)` when no audio samples arrive
+Update `README.md` when behavior, install, or permissions change.
 
 ## Transcript format contract
 
-Expected output shape:
+Keep stable unless there is a clear product reason; document any change in `README.md`.
 
 ```markdown
 ---
@@ -261,6 +130,4 @@ notes: |
 [00:10] Next chunk continues here with natural grouping.
 ```
 
-Manual recordings keep the same markdown structure but omit calendar-specific fields and infer a better title from the transcript when possible.
-
-Keep this format stable unless there is a clear product reason to change it, and document any format change in `README.md`.
+Manual recordings omit calendar fields and infer a title from the transcript.

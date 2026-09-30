@@ -4,9 +4,7 @@ MEMORY.md
 .swiftpm/
 .claude/
 .codex/
-.openclaw/
 .pi/
-MenuBarRecorder.app/
 TokDown.app/
 TokDown.app.zip
 
@@ -18,5 +16,6 @@ TokDown.app.zip
 
 # Signing artifacts
 *.key
+*.p12
 *.cer
 *.certSigningRequest
