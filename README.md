@@ -126,11 +126,13 @@ Release build:
 bash scripts/build-app.sh release
 ```
 
-## Install from GitHub Releases
+## Install
 
-1. Download `TokDown.app.zip` from the [Releases](../../releases) page
-2. Unzip and move `TokDown.app` to `/Applications`
-3. Launch — if macOS warns on first run, right-click → **Open**
+```bash
+brew install --cask scty-inc/tap/tokdown
+```
+
+Or download `TokDown.app.zip` from [Releases](../../releases), unzip, and move `TokDown.app` to `/Applications`. Builds are notarized. Requires macOS 26.
 
 Open **Settings** from the menu bar to change the save folder and choose between Meeting Audio and Microphone Only across relaunches.
 

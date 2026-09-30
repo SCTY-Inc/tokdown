@@ -73,6 +73,7 @@ Core product constraints:
 - `Sources/TokDown/StorageService.swift` — transcript paths, deletion, and temporary `.m4a` cleanup on startup
 - `Sources/TokDown/CalendarService.swift` — upcoming meetings and calendar permissions
 - `scripts/build-app.sh` — build, bundle, sign, and zip release artifact
+- `scripts/mac-release.sh` — Developer ID sign, notarize, staple, and zip for distribution (copy of the shared `ios` skill script)
 
 ## How to run the project
 
@@ -98,6 +99,16 @@ bash scripts/build-app.sh release
 Artifacts:
 - `TokDown.app`
 - `TokDown.app.zip`
+
+Ship a notarized release (needs a Developer ID identity and a `notary` notarytool profile):
+
+```bash
+bash scripts/build-app.sh release
+bash scripts/mac-release.sh TokDown.app Sources/TokDown/Resources/TokDown.entitlements
+gh release create vX.Y TokDown.app.zip
+```
+
+Then set `version` and the printed `sha256` in `Casks/tokdown.rb` in `SCTY-Inc/homebrew-tap`.
 
 ## Build, test, and lint commands
 
